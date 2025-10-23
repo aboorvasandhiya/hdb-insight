@@ -1,9 +1,14 @@
 import React, { useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar
+} from "recharts";
 import { FaUserCircle } from "react-icons/fa";
+import { useNavigate } from "react-router-dom";
 
 const Dashboard= () => {
+  const navigate = useNavigate();
   const [selectedTab, setSelectedTab] = useState("Dashboard");
+  const [selectedYear, setSelectedYear] = useState(2025);
 
   const lineData = [
     { name: "08 May", price: 520 },
@@ -30,29 +35,55 @@ const Dashboard= () => {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
-      <div className="flex justify-between items-center px-6 py-3 border-b bg-white shadow-sm">
-        <h1 className="text-xl font-semibold">HDB Resale Market Analyzer</h1>
-        <div className="flex items-center space-x-2 text-red-600 font-medium">
+      <div className="flex justify-between items-center px-6 py-4 border-b bg-white shadow-sm">
+        <h1 className="text-2xl font-bold text-gray-800">HDB Resale Market Analyzer</h1>
+         <button
+          onClick={() => navigate("/account")}
+          className="flex items-center space-x-2 text-red-600 font-medium hover:text-red-700 transition"
+        >
           <FaUserCircle className="text-xl" />
           <span>Logged in as: Cust1</span>
-        </div>
+        </button>
       </div>
-
-      {/* Tabs */}
       <div className="flex space-x-6 border-b bg-white px-6">
-        {["Dashboard", "Data Management", "Insights"].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setSelectedTab(tab)}
-            className={`py-2 border-b-2 ${
-              selectedTab === tab
-                ? "border-red-400 text-red-500 font-medium"
-                : "border-transparent text-gray-400"
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
+        <button
+          onClick={() => {
+            setSelectedTab("Dashboard");
+            navigate("/dashboard");
+          }}
+          className={`py-2 border-b-2 ${
+            selectedTab === "Dashboard"
+              ? "border-red-400 text-red-500 font-medium"
+              : "border-transparent text-gray-400"
+          }`}
+        >
+          Dashboard
+        </button>
+
+        <button
+          onClick={() => {
+            setSelectedTab("Data Management");
+            navigate("/data");
+          }}
+          className={`py-2 border-b-2 ${
+            selectedTab === "Data Management"
+              ? "border-red-400 text-red-500 font-medium"
+              : "border-transparent text-gray-400"
+          }`}
+        >
+          Data Management
+        </button>
+
+        <button
+          onClick={() => setSelectedTab("Insights")}
+          className={`py-2 border-b-2 ${
+            selectedTab === "Insights"
+              ? "border-red-400 text-red-500 font-medium"
+              : "border-transparent text-gray-400"
+          }`}
+        >
+          Insights
+        </button>
       </div>
       <div className="p-6 grid grid-cols-12 gap-6">
         <div className="col-span-3 bg-white p-4 rounded-xl shadow-sm">
@@ -101,7 +132,19 @@ const Dashboard= () => {
           </div>
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-1">Transaction Year</label>
-            <input type="range" min="2000" max="2025" className="w-full accent-red-400" />
+            <input 
+              type="range" 
+              min="2000" 
+              max="2025" 
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+              className="w-full accent-red-400 mb-2" 
+            />
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>2000</span>
+              <span className="font-semibold text-red-500">{selectedYear}</span>
+              <span>2025</span>
+            </div>
           </div>
           <button className="w-full bg-lime-50 text-gray-700 py-2 rounded-md hover:bg-lime-100">
             Filter
