@@ -51,12 +51,13 @@ export default function UserAccount() {
       </div>
 
       <div className="flex space-x-6 border-b bg-white px-8">
-        <button
-          onClickme="py-3 border-b-2 border-transparent text-gray-400 hover:text-red-500 transition"
-        >={() => navigate("/dashboard")}
-          classNa
-          Dashboard
+       <button
+          onClick={() => navigate("/data")}
+          className="py-3 border-b-2 border-transparent text-gray-400 hover:text-red-500 transition"
+        >
+          Data Management
         </button>
+
 
         <button
           onClick={() => navigate("/data")}
