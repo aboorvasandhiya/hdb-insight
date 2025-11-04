@@ -18,6 +18,9 @@ const pool = new Pool({
 
 // ========== Routes ==========
 
+
+//Admin Dahsboard APIs
+
 // 1. Get all towns
 app.get("/api/towns", async (req, res) => {
   try {
@@ -124,6 +127,8 @@ app.get("/api/metrics/yearly-trend", async (req, res) => {
   }
 });
 
+
+//Admin Data Management APIs
 
 //7. list resales for data management table
 app.get("/api/resales/table", async (req, res) => {
