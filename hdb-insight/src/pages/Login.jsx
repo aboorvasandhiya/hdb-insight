@@ -8,7 +8,31 @@ export default function Login() {
   const [password, setPassword] = useState("admin");
   const [error, setError] = useState("");
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    try {
+      const res = await fetch("http://localhost:3001/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!res.ok) return setError(data.error || "Login failed");
+  
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("username", data.user.username);
+      localStorage.setItem("role", data.user.role || "user");
+  
+      // route by role if you want
+      if (data.user.role === "admin") navigate("/admin-dashboard");
+      else navigate("/dashboard");
+    } catch (err) {
+      setError("Network error");
+    }
+  };
+
+  /*const handleSubmit = (e) => {
     e.preventDefault();
     if (username.trim() === "admin" && password === "admin") {
       setError("");
@@ -19,7 +43,7 @@ export default function Login() {
     } else {
       setError("Invalid credentials — try admin/admin or cust1/cust1");
     }
-  };
+  };*/
 
   return (
     <div className="min-h-screen flex items-center justify-center auth-bg">

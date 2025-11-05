@@ -50,6 +50,16 @@ const AdminDashboard = () => {
     .catch(err => console.error("Error fetching avg price by town:", err));
 }, []);
 
+  function useLogout() {
+    const navigate = useNavigate();
+    return () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("username");
+      localStorage.removeItem("role");
+      navigate("/", { replace: true }); // back to Login
+    };
+  }
+
   /*
   const lineData = [
     { name: "Jan", price: 520000 },
@@ -70,7 +80,6 @@ const AdminDashboard = () => {
     { town: "Jurong West", value: 520000 },
   ];
   */
- 
 
   const tableData = [
     { town: "Central Blk 123", date: "16/10/23", sentiment: "High Demand" },
@@ -82,14 +91,16 @@ const AdminDashboard = () => {
     { town: "Jurong West Blk 147", date: "10/10/23", sentiment: "Value Buy" },
   ];
 
+  const logout = useLogout();
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
       <div className="flex justify-between items-center px-6 py-4 border-b bg-white shadow-sm">
         <h1 className="text-2xl font-bold text-gray-800">HDB Resale Market Analyzer</h1>
         <button
-          onClick={() => navigate("/account")}
-          className="flex items-center space-x-2 text-red-600 font-medium hover:text-red-700 transition"
+        onClick={logout}
+        className="flex items-center space-x-2 text-red-600 font-medium hover:text-red-700 transition"
+         title="Logout"
         >
           <FaUserCircle className="text-xl" />
           <span>Logged in as: Admin</span>

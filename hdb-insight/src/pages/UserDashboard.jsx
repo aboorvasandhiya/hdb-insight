@@ -42,7 +42,7 @@ const Dashboard= () => {
           className="flex items-center space-x-2 text-red-600 font-medium hover:text-red-700 transition"
         >
           <FaUserCircle className="text-xl" />
-          <span>Logged in as: Cust1</span>
+          <span>Logged in as: {localStorage.getItem("username") || "Guest"}</span>
         </button>
       </div>
       <div className="flex space-x-6 border-b bg-white px-6">

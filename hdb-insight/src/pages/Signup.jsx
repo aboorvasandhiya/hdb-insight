@@ -14,7 +14,7 @@ export default function Signup() {
     setForm((s) => ({ ...s, [k]: e.target.value }));
   };
 
-  const handleCreate = (e) => {
+  /*const handleCreate = (e) => {
     e.preventDefault();
     if (!form.username || !form.password || !form.confirm) {
       setMessage("Please fill the required");
@@ -24,7 +24,43 @@ export default function Signup() {
       setMessage("Passwords do not match.");
       return;
     }
+  };*/
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setMessage("");             // clear any old message
+    try {
+      const res = await fetch("http://localhost:3001/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: form.username,
+          password: form.password,
+          email: null,
+          phone: form.phone
+        })
+      });
+  
+      // Always try to parse once
+      const data = await res.json().catch(() => null);
+  
+      if (!res.ok) {
+        setMessage((data && data.error) || "Signup failed");
+        return;
+      }
+  
+      // success
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("username", data.user.username);
+      localStorage.setItem("role", data.user.role || "user");
+      setMessage("Account created!");
+      // optionally navigate("/dashboard");
+    } catch (err) {
+      console.error(err);
+      setMessage("Network error");
+    }
   };
+    
 
   return (
     <div className="min-h-screen flex items-center justify-center auth-bg">

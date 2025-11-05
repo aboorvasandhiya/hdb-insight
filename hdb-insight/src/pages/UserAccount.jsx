@@ -1,46 +1,110 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaUserCircle, FaEdit, FaSave, FaTimes } from "react-icons/fa";
 
 export default function UserAccount() {
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
   const [userInfo, setUserInfo] = useState({
-    username: "Cust1",
-    email: "cust1@example.com",
-    phone: "+65 9123 4567",
-    joinDate: "January 2024",
-    totalTransactions: "47",
-    favoriteTown: "Bedok",
+    username: localStorage.getItem("username") || "",
+    email: "",
+    phone: "",
+    joinDate: "",
+    totalTransactions: "-", // placeholder (wire later if you track searches)
   });
 
-  const handleEdit = () => {
-    setIsEditing(true);
-  };
+  // Load current user
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/");
+      return;
+    }
+    (async () => {
+      try {
+        setError("");
+        const res = await fetch("http://localhost:3001/api/auth/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Failed to load profile");
+          return;
+        }
+        setUserInfo((prev) => ({
+          ...prev,
+          username: data.username || prev.username,
+          email: data.email ?? "",
+          phone: data.phone ?? "",
+          joinDate: data.createdAt
+            ? new Date(data.createdAt).toLocaleString("en-SG", {
+                month: "long",
+                year: "numeric",
+              })
+            : "",
+        }));
+      } catch {
+        setError("Network error");
+      }
+    })();
+  }, [navigate]);
 
-  const handleSave = () => {
-    setIsEditing(false);
-    //backend take care pls
-  };
-
+  const handleEdit = () => setIsEditing(true);
   const handleCancel = () => {
     setIsEditing(false);
+    setError("");
   };
 
-  const handleInputChange = (field, value) => {
-    setUserInfo(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  const handleSave = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return navigate("/");
+    try {
+      setSaving(true);
+      setError("");
+      const res = await fetch("http://localhost:3001/api/account", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          username: userInfo.username,
+          email: userInfo.email,
+          phone: userInfo.phone,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Save failed");
+        return;
+      }
+      // reflect updated username in localStorage (and header)
+      if (data.username) localStorage.setItem("username", data.username);
+      setIsEditing(false);
+    } catch {
+      setError("Network error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleInputChange = (field, value) =>
+    setUserInfo((prev) => ({ ...prev, [field]: value }));
+
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("username");
+    localStorage.removeItem("role");
+    navigate("/");
   };
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
       <div className="flex justify-between items-center px-8 py-5 bg-white border-b shadow-sm">
-        <h1 className="text-2xl font-bold text-gray-800">
-          HDB Resale Market Analyzer
-        </h1>
-
+        <h1 className="text-2xl font-bold text-gray-800">HDB Resale Market Analyzer</h1>
         <button
           onClick={() => navigate("/dashboard")}
           className="flex items-center space-x-2 text-red-600 font-medium hover:text-red-700 transition"
@@ -51,21 +115,12 @@ export default function UserAccount() {
       </div>
 
       <div className="flex space-x-6 border-b bg-white px-8">
-       <button
-          onClick={() => navigate("/data")}
-          className="py-3 border-b-2 border-transparent text-gray-400 hover:text-red-500 transition"
-        >
-          Data Management
-        </button>
-
-
         <button
           onClick={() => navigate("/data")}
           className="py-3 border-b-2 border-transparent text-gray-400 hover:text-red-500 transition"
         >
           Data Management
         </button>
-
         <button
           onClick={() => navigate("/insights")}
           className="py-3 border-b-2 border-transparent text-gray-400 hover:text-red-500 transition"
@@ -90,10 +145,11 @@ export default function UserAccount() {
               <div className="flex space-x-3">
                 <button
                   onClick={handleSave}
-                  className="flex items-center space-x-2 px-5 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition"
+                  disabled={saving}
+                  className="flex items-center space-x-2 px-5 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition disabled:opacity-60"
                 >
                   <FaSave className="text-sm" />
-                  <span>Save</span>
+                  <span>{saving ? "Saving..." : "Save"}</span>
                 </button>
                 <button
                   onClick={handleCancel}
@@ -105,6 +161,11 @@ export default function UserAccount() {
               </div>
             )}
           </div>
+
+          {error && (
+            <p className="text-sm text-red-600 mb-4">{error}</p>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
             <div className="space-y-5">
               <h3 className="text-lg font-semibold text-gray-700 border-b pb-2">
@@ -139,7 +200,7 @@ export default function UserAccount() {
                     className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-red-400"
                   />
                 ) : (
-                  <p className="text-gray-800 font-medium">{userInfo.email}</p>
+                  <p className="text-gray-800 font-medium">{userInfo.email || "—"}</p>
                 )}
               </div>
 
@@ -155,7 +216,7 @@ export default function UserAccount() {
                     className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-red-400"
                   />
                 ) : (
-                  <p className="text-gray-800 font-medium">{userInfo.phone}</p>
+                  <p className="text-gray-800 font-medium">{userInfo.phone || "—"}</p>
                 )}
               </div>
 
@@ -163,7 +224,7 @@ export default function UserAccount() {
                 <label className="block text-sm font-medium text-gray-500 mb-1">
                   Member Since
                 </label>
-                <p className="text-gray-800 font-medium">{userInfo.joinDate}</p>
+                <p className="text-gray-800 font-medium">{userInfo.joinDate || "—"}</p>
               </div>
             </div>
 
@@ -178,12 +239,12 @@ export default function UserAccount() {
                     {userInfo.totalTransactions}
                   </p>
                   <p className="text-sm text-gray-600">Total Searches</p>
-                  {/* I JUST ADD THIS IDK CAN MAKE USE OF THE DB OR SMTH */}
                 </div>
               </div>
+
               <div className="pt-6">
                 <button
-                  onClick={() => navigate("/")}
+                  onClick={logout}
                   className="w-full py-3 bg-red-500 text-white font-medium rounded-lg hover:bg-red-600 transition"
                 >
                   Logout

@@ -3,6 +3,12 @@ import cors from "cors";
 import pkg from "pg";
 const { Pool } = pkg;
 
+import dotenv from "dotenv";
+import { MongoClient, ServerApiVersion, ObjectId } from "mongodb";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -249,10 +255,278 @@ app.post("/api/resales", async (req, res) => {
   }
 });
 
+// ===== MongoDB users + insights =====
+dotenv.config();
+
+let _mongoClient = null;
+let _db = null;
+let Users = null;
+let Insights = null;
+
+async function initMongo() {
+  if (_mongoClient) return;
+  _mongoClient = new MongoClient(process.env.MONGODB_URI, {
+    serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
+  });
+  await _mongoClient.connect();
+  _db = _mongoClient.db("hdb_insights");
+  Users = _db.collection("users");
+  Insights = _db.collection("insights");
+  console.log("✅ Mongo connected");
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
+function auth(req, res, next) {
+  const h = req.headers.authorization || "";
+  const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "missing token" });
+  try { req.user = jwt.verify(token, JWT_SECRET); return next(); }
+  catch { return res.status(401).json({ error: "invalid token" }); }
+}
+
+// --- AUTH (MongoDB) ---
+app.post("/api/auth/signup", async (req, res) => {
+  await initMongo();
+  const { username, email, password, phone } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: "username & password required" });
+
+  const existing = await Users.findOne({ username }, { collation: { locale: "en", strength: 2 } });
+  if (existing) return res.status(400).json({ error: "username already exists" });
+
+  // optional: basic phone sanitize (keep digits/spaces/+ only)
+  const phoneClean = typeof phone === "string" ? phone.trim() : null;
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const r = await Users.insertOne({
+    username,
+    email: email ?? null,
+    phone: phoneClean ?? null,
+    passwordHash,
+    role: "user",
+    createdAt: new Date(),
+    lastLoginAt: null
+  });
+
+  const token = jwt.sign({ id: r.insertedId, username, role: "user" }, JWT_SECRET, { expiresIn: "7d" });
+  res.json({ token, user: { id: r.insertedId, username, role: "user", phone: phoneClean ?? null } });
+});
 
 
+app.post("/api/auth/login", async (req, res) => {
+  await initMongo();
+  const { username, password } = req.body || {};
+  const u = await Users.findOne({ username }, { collation: { locale: "en", strength: 2 } });
+  if (!u) return res.status(401).json({ error: "invalid credentials" });
+  const ok = await bcrypt.compare(password, u.passwordHash);
+  if (!ok) return res.status(401).json({ error: "invalid credentials" });
+  await Users.updateOne({ _id: u._id }, { $set: { lastLoginAt: new Date() } });
 
+  const token = jwt.sign({ id: u._id, username: u.username, role: u.role }, JWT_SECRET, { expiresIn: "7d" });
+  res.json({ token, user: { id: u._id, username: u.username, role: u.role } });
+});
 
+// --- INSIGHTS (MongoDB) ---
+app.post("/api/insights", auth, async (req, res) => {
+  await initMongo();
+  const { town, comment, rating, tags } = req.body || {};
+  if (!town || !comment) return res.status(400).json({ error: "town & comment required" });
+
+  const userObjectId = ObjectId.createFromHexString(req.user.id);
+
+  const doc = {
+    userId: userObjectId,
+    username: req.user.username,
+    town,
+    comment,
+    rating: rating ? Number(rating) : null,
+    tags: Array.isArray(tags) ? tags : [],
+    status: "pending",
+    date: new Date(),
+    createdAt: new Date(),
+    updatedAt: null
+  };
+  const r = await Insights.insertOne(doc);
+  res.json({ insertedId: r.insertedId, status: "pending" });
+});
+
+app.get("/api/insights", async (_req, res) => {
+  await initMongo();
+  const docs = await Insights.find({ status: "approved" })
+    .sort({ date: -1 })
+    .limit(100)
+    .toArray();
+  res.json(docs);
+});
+
+app.get("/api/insights/mine", auth, async (req, res) => {
+  await initMongo();
+  const userObjectId = ObjectId.createFromHexString(req.user.id);
+  const docs = await Insights.find({ userId: userObjectId })
+    .sort({ createdAt: -1 })
+    .toArray();
+  res.json(docs);
+});
+
+// Put this AFTER your Mongo vars and initMongo(), BEFORE app.listen(...)
+app.get("/_debug/mongo", async (_req, res) => {
+  try {
+    await initMongo();
+
+    // support both styles (_mongoClient/_db) or (mongoClient/mongoDb)
+    const client = (typeof _mongoClient !== "undefined" && _mongoClient) || mongoClient;
+    const db     = (typeof _db !== "undefined" && _db) || mongoDb;
+
+    if (!client || !db) {
+      return res.status(500).json({ error: "Mongo client/db not initialized" });
+    }
+
+    const admin = client.db().admin();
+    const dbs = await admin.listDatabases();
+    const count = await Users.countDocuments();
+    const latest = await Users.find()
+      .project({ username: 1, createdAt: 1 })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .toArray();
+
+    res.json({
+      connectedTo: process.env.MONGODB_URI,
+      usingDatabase: db.databaseName,
+      databases: dbs.databases.map(d => d.name),
+      usersCount: count,
+      latestUsers: latest
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Get current user (no passwordHash)
+app.get("/api/auth/me", auth, async (req, res) => {
+  await initMongo();
+  const u = await Users.findOne(
+    { _id: ObjectId.createFromHexString(req.user.id) },
+    { projection: { passwordHash: 0 } }
+  );
+  if (!u) return res.status(404).json({ error: "user not found" });
+  res.json(u);
+});
+
+// Update current user's basic profile
+app.put("/api/account", auth, async (req, res) => {
+  await initMongo();
+  const { username, email, phone } = req.body || {};
+  const _id = ObjectId.createFromHexString(req.user.id);
+
+  // if username is changing, enforce uniqueness (case-insensitive)
+  if (username && username !== req.user.username) {
+    const exists = await Users.findOne(
+      { username },
+      { collation: { locale: "en", strength: 2 } }
+    );
+    if (exists && exists._id.toString() !== _id.toString()) {
+      return res.status(400).json({ error: "username already exists" });
+    }
+  }
+
+  const update = {
+    ...(username ? { username } : {}),
+    ...(email !== undefined ? { email } : {}),
+    ...(phone !== undefined ? { phone } : {}),
+    updatedAt: new Date()
+  };
+
+  await Users.updateOne({ _id }, { $set: update });
+
+  // if username changed, reflect that in token-bearing client state
+  const fresh = await Users.findOne(
+    { _id },
+    { projection: { passwordHash: 0 } }
+  );
+  res.json(fresh);
+});
+
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'admin only' });
+  }
+  next();
+}
+
+/**
+ * GET /api/admin/insights
+ * List insights for moderation.
+ * Query:
+ *  - status: 'pending' | 'approved' | 'rejected' (default: pending)
+ *  - q: optional text search over town/comment
+ */
+ app.get('/api/admin/insights', auth, requireAdmin, async (req, res) => {
+  await initMongo();
+  const { status = 'pending', q = '' } = req.query;
+
+  const filter = { status };
+  if (q) {
+    filter.$or = [
+      { comment: { $regex: q, $options: 'i' } },
+      { town: { $regex: q, $options: 'i' } },
+    ];
+  }
+
+  const docs = await Insights
+    .find(filter)
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .toArray();
+
+  res.json(docs);
+});
+
+/**
+ * PATCH /api/admin/insights/:id
+ * Body: { status: 'approved' | 'rejected' }
+ */
+app.patch('/api/admin/insights/:id', auth, requireAdmin, async (req, res) => {
+  await initMongo();
+  const { id } = req.params;
+  const { status } = req.body || {};
+
+  if (!['approved', 'rejected'].includes(status)) {
+    return res.status(400).json({ error: 'invalid status' });
+  }
+
+  const r = await Insights.updateOne(
+    { _id: ObjectId.createFromHexString(id) },
+    { $set: { status, updatedAt: new Date() } }
+  );
+
+  res.json({ modifiedCount: r.modifiedCount });
+});
+
+/**
+ * DELETE /api/admin/insights/:id
+ * Permanently remove an insight.
+ */
+app.delete('/api/admin/insights/:id', auth, requireAdmin, async (req, res) => {
+  await initMongo();
+  const { id } = req.params;
+
+  const r = await Insights.deleteOne({ _id: ObjectId.createFromHexString(id) });
+  res.json({ deletedCount: r.deletedCount });
+});
+
+/**
+ * GET /api/admin/insights/stats
+ * Simple moderation counters.
+ */
+app.get('/api/admin/insights/stats', auth, requireAdmin, async (_req, res) => {
+  await initMongo();
+  const [pending, approved, rejected] = await Promise.all([
+    Insights.countDocuments({ status: 'pending' }),
+    Insights.countDocuments({ status: 'approved' }),
+    Insights.countDocuments({ status: 'rejected' }),
+  ]);
+  res.json({ pending, approved, rejected });
+});
 
 // ========== Start server ==========
 const PORT = 3001;
