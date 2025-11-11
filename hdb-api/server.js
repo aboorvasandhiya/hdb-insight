@@ -133,10 +133,58 @@ app.get("/api/metrics/yearly-trend", async (req, res) => {
   }
 });
 
+// 7. GET /api/metrics/price-per-sqm?scope=all|latest or ?year=YYYY
+app.get("/api/metrics/price-per-sqm", async (req, res) => {
+  try {
+    const { scope, year } = req.query;
+
+    let sql, params = [];
+
+    if (scope === "all") {
+      // ALL YEARS (overall PPSM)
+      sql = `
+        SELECT ROUND(SUM(resale_price)::numeric / NULLIF(SUM(floor_area_sqm),0)) AS price_per_sqm
+        FROM resale_transactions;
+      `;
+    } else if (scope === "latest") {
+      // LATEST YEAR in the table
+      sql = `
+        WITH latest AS (
+          SELECT MAX(EXTRACT(YEAR FROM month))::int AS y FROM resale_transactions
+        )
+        SELECT ROUND(SUM(t.resale_price)::numeric / NULLIF(SUM(t.floor_area_sqm),0)) AS price_per_sqm
+        FROM resale_transactions t
+        JOIN latest l ON EXTRACT(YEAR FROM t.month) = l.y;
+      `;
+    } else if (year) {
+      // SPECIFIC YEAR
+      sql = `
+        SELECT ROUND(SUM(resale_price)::numeric / NULLIF(SUM(floor_area_sqm),0)) AS price_per_sqm
+        FROM resale_transactions
+        WHERE EXTRACT(YEAR FROM month) = $1;
+      `;
+      params = [Number(year)];
+    } else {
+      // default: ALL YEARS
+      sql = `
+        SELECT ROUND(SUM(resale_price)::numeric / NULLIF(SUM(floor_area_sqm),0)) AS price_per_sqm
+        FROM resale_transactions;
+      `;
+    }
+
+    const result = await pool.query(sql, params);
+    res.json(result.rows[0] ?? { price_per_sqm: null });
+  } catch (err) {
+    console.error("price-per-sqm error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 
 //Admin Data Management APIs
 
-//7. list resales for data management table
+//1. list resales for data management table
 app.get("/api/resales/table", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -164,7 +212,7 @@ app.get("/api/resales/table", async (req, res) => {
 });
 
 
-// create new resale from admin-data page
+// 2. create new resale from admin-data page
 app.post("/api/resales", async (req, res) => {
   try {
     const {
@@ -254,6 +302,7 @@ app.post("/api/resales", async (req, res) => {
     res.status(500).json({ error: "db error" });
   }
 });
+
 
 // ===== MongoDB users + insights =====
 dotenv.config();

@@ -1,4 +1,4 @@
-import React, { useState , useEffect} from "react";
+import React, { useState , useEffect, useMemo} from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar
 } from "recharts";
@@ -14,6 +14,8 @@ const AdminDashboard = () => {
   const [totalTx, setTotalTx] = useState(0);
   const [lineData, setLineData] = useState([]);   // for monthly trend chart
   const [barData, setBarData] = useState([]);     // for avg price by town
+  const [pricePerSqm, setPricePerSqm] = useState(null); // for price per sqm
+
 
 
   useEffect(() => {
@@ -48,7 +50,22 @@ const AdminDashboard = () => {
       setBarData(formatted);
     })
     .catch(err => console.error("Error fetching avg price by town:", err));
-}, []);
+
+
+    // 4. Price per sqm 
+    fetch("http://localhost:3001/api/metrics/price-per-sqm")
+      .then(res => res.json())
+      .then(d => setPricePerSqm(d?.price_per_sqm != null ? Number(d.price_per_sqm) : null))
+      .catch(err => {
+        console.error("Error fetching price-per-sqm (latest):", err);
+        setPricePerSqm(null);
+      });
+
+  }, []);
+
+
+
+
 
   function useLogout() {
     const navigate = useNavigate();
@@ -238,7 +255,12 @@ const AdminDashboard = () => {
                     ? "SGD " + lineData[lineData.length - 1].price.toLocaleString()
                     : "—",
               },
-              { label: "Price per SQM", value: "—" }, // you can make another endpoint later
+              {
+                label: "Price per SQM",
+                value: pricePerSqm != null
+                  ? "SGD " + pricePerSqm.toLocaleString()
+                  : "—",
+              },
               { label: "Market Sentiment", value: "Bullish" },
             ].map((item) => (
               <div key={item.label} className="bg-white shadow-sm rounded-xl p-4 text-center">
@@ -279,9 +301,12 @@ const AdminDashboard = () => {
           <div className="grid grid-cols-2 gap-6">
             <div className="bg-white rounded-xl shadow-sm p-4">
               <h3 className="text-md font-semibold mb-2">Market Performance Analysis</h3>
-              <ResponsiveContainer width="100%" height={200}>
+              <ResponsiveContainer width="100%" height={210}>
                 <LineChart data={lineData}>
-                  <XAxis dataKey="name" />
+                  <XAxis dataKey="name" 
+                    interval={1}          // <-- show every year
+                    tickMargin={8}        // <-- add spacing
+                  />
                   <YAxis />
                   <Tooltip />
                   <Line type="monotone" dataKey="price" stroke="#6366f1" strokeWidth={3} />
@@ -289,12 +314,21 @@ const AdminDashboard = () => {
               </ResponsiveContainer>
             </div>
 
+
             <div className="bg-white rounded-xl shadow-sm p-4">
               <h3 className="text-md font-semibold mb-2">Premium vs Affordable Districts</h3>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={barData.slice(0, 8)} layout="vertical">
-                  <XAxis type="number" />
-                  <YAxis type="category" dataKey="town" width={120} />
+                  <XAxis type="number" 
+                    interval={0}          // <-- show every year
+                    tickMargin={8}        // <-- add spacing
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="town"
+                    interval={0}     // <- show EVERY label; no auto-skip
+                    width={140}      // <- a bit wider so names don’t truncate
+                  />
                   <Tooltip />
                   <Bar dataKey="value" fill="#6b9080" radius={[5, 5, 5, 5]} />
                 </BarChart>
