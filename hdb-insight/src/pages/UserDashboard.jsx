@@ -75,7 +75,10 @@ const Dashboard= () => {
         </button>
 
         <button
-          onClick={() => setSelectedTab("Insights")}
+          onClick={() => {
+            setSelectedTab("Insights")
+            navigate("/insights");
+          }}
           className={`py-2 border-b-2 ${
             selectedTab === "Insights"
               ? "border-red-400 text-red-500 font-medium"
@@ -84,6 +87,7 @@ const Dashboard= () => {
         >
           Insights
         </button>
+
       </div>
       <div className="p-6 grid grid-cols-12 gap-6">
         <div className="col-span-3 bg-white p-4 rounded-xl shadow-sm">

@@ -22,6 +22,32 @@ const pool = new Pool({
   password: "root",  // change this to your real psql password
 });
 
+
+// Helper to build optional WHERE clause for town, flat type, flat model
+function buildFilters(query) {
+  const { town, flatType, flatModel } = query;
+  const where = [];
+  const params = [];
+  let i = 1;
+
+  if (town) {
+    where.push(`t.town_name = $${i++}`);
+    params.push(town);
+  }
+  if (flatType) {
+    where.push(`ft.flat_type_name = $${i++}`);
+    params.push(flatType);
+  }
+  if (flatModel) {
+    where.push(`fm.flat_model_name = $${i++}`);
+    params.push(flatModel);
+  }
+
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+  return { whereSql, params };
+}
+
+
 // ========== Routes ==========
 
 
@@ -37,6 +63,95 @@ app.get("/api/towns", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
+
+// Get flat types, optionally filtered by town
+app.get("/api/flat-types", async (req, res) => {
+  try {
+    const { town } = req.query;
+
+    let sql;
+    let params = [];
+
+    if (town) {
+      // Only types that actually appear in transactions for this town
+      sql = `
+        SELECT DISTINCT ft.flat_type_name
+        FROM resale_transactions r
+        JOIN towns t       ON r.town_id      = t.town_id
+        JOIN flat_types ft ON r.flat_type_id = ft.flat_type_id
+        WHERE t.town_name = $1
+        ORDER BY ft.flat_type_name;
+      `;
+      params = [town];
+    } else {
+      // All types
+      sql = `
+        SELECT DISTINCT flat_type_name
+        FROM flat_types
+        ORDER BY flat_type_name;
+      `;
+    }
+
+    const result = await pool.query(sql, params);
+    res.json(result.rows.map(r => r.flat_type_name));
+  } catch (err) {
+    console.error("flat-types error", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+
+// Get flat models, optionally filtered by town + flatType
+app.get("/api/flat-models", async (req, res) => {
+  try {
+    const { town, flatType } = req.query;
+
+    let sql;
+    let params = [];
+
+    if (town && flatType) {
+      // Models that exist for this town + flat type
+      sql = `
+        SELECT DISTINCT fm.flat_model_name
+        FROM resale_transactions r
+        JOIN towns t        ON r.town_id       = t.town_id
+        JOIN flat_types ft  ON r.flat_type_id  = ft.flat_type_id
+        JOIN flat_models fm ON r.flat_model_id = fm.flat_model_id
+        WHERE t.town_name = $1
+          AND ft.flat_type_name = $2
+        ORDER BY fm.flat_model_name;
+      `;
+      params = [town, flatType];
+    } else if (town) {
+      // Models for this town (any flat type)
+      sql = `
+        SELECT DISTINCT fm.flat_model_name
+        FROM resale_transactions r
+        JOIN towns t        ON r.town_id       = t.town_id
+        JOIN flat_models fm ON r.flat_model_id = fm.flat_model_id
+        WHERE t.town_name = $1
+        ORDER BY fm.flat_model_name;
+      `;
+      params = [town];
+    } else {
+      // All models
+      sql = `
+        SELECT DISTINCT flat_model_name
+        FROM flat_models
+        ORDER BY flat_model_name;
+      `;
+    }
+
+    const result = await pool.query(sql, params);
+    res.json(result.rows.map(r => r.flat_model_name));
+  } catch (err) {
+    console.error("flat-models error", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+
+
 
 // 2. Get resale transactions (optional filter by town)
 app.get("/api/resales", async (req, res) => {
@@ -64,6 +179,8 @@ app.get("/api/resales", async (req, res) => {
 });
 
 // 3. Simple analytics: average price by town
+// 3. Average price by town for bar chart (GLOBAL, no filters)
+// 3. Simple analytics: average price by town
 app.get("/api/analytics/avg-price-by-town", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -83,16 +200,31 @@ app.get("/api/analytics/avg-price-by-town", async (req, res) => {
 });
 
 
-//4. Total Transactions
+
+/*
+//4. Total Transactions (optionally filtered by town)
 app.get("/api/metrics/total-transactions", async (req, res) => {
   try {
-    const result = await pool.query("SELECT COUNT(*) AS total FROM resale_transactions;");
+    const { town } = req.query;
+    const { where, params } = buildTownWhere(town);
+
+    const result = await pool.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM resale_transactions r
+      JOIN towns t ON r.town_id = t.town_id
+      ${where};
+      `,
+      params
+    );
+
     res.json(result.rows[0]); // { total: "233815" }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "db error" });
   }
 });
+
 
 
 //5. Average price by town (for bar chart)
@@ -114,18 +246,27 @@ app.get("/api/metrics/avg-price-by-town", async (req, res) => {
 });
 
 
-// 6. Yearly trend (for the line chart)
+// 6. Yearly trend (for the line chart) — optionally filtered by town
 app.get("/api/metrics/yearly-trend", async (req, res) => {
   try {
-    const result = await pool.query(`
+    const { town } = req.query;
+    const { where, params } = buildTownWhere(town);
+
+    const result = await pool.query(
+      `
       SELECT
         DATE_TRUNC('year', r.month) AS year,
         ROUND(AVG(r.resale_price), 0) AS avg_price,
         COUNT(*) AS total_txn
       FROM resale_transactions r
+      JOIN towns t ON r.town_id = t.town_id
+      ${where}
       GROUP BY DATE_TRUNC('year', r.month)
       ORDER BY year;
-    `);
+      `,
+      params
+    );
+
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -133,52 +274,159 @@ app.get("/api/metrics/yearly-trend", async (req, res) => {
   }
 });
 
+
+
 // 7. GET /api/metrics/price-per-sqm?scope=all|latest or ?year=YYYY
+// 7. Price per SQM for the latest year, optionally filtered by town
 app.get("/api/metrics/price-per-sqm", async (req, res) => {
   try {
-    const { scope, year } = req.query;
+    const { town } = req.query;
 
-    let sql, params = [];
+    let sql;
+    let params = [];
 
-    if (scope === "all") {
-      // ALL YEARS (overall PPSM)
+    if (town) {
+      // latest year within this town
       sql = `
-        SELECT ROUND(SUM(resale_price)::numeric / NULLIF(SUM(floor_area_sqm),0)) AS price_per_sqm
-        FROM resale_transactions;
-      `;
-    } else if (scope === "latest") {
-      // LATEST YEAR in the table
-      sql = `
-        WITH latest AS (
-          SELECT MAX(EXTRACT(YEAR FROM month))::int AS y FROM resale_transactions
+        WITH latest_year AS (
+          SELECT MAX(DATE_TRUNC('year', r.month)) AS year_start
+          FROM resale_transactions r
+          JOIN towns t ON r.town_id = t.town_id
+          WHERE t.town_name = $1
         )
-        SELECT ROUND(SUM(t.resale_price)::numeric / NULLIF(SUM(t.floor_area_sqm),0)) AS price_per_sqm
-        FROM resale_transactions t
-        JOIN latest l ON EXTRACT(YEAR FROM t.month) = l.y;
+        SELECT
+          TO_CHAR(ly.year_start, 'YYYY')::int AS year,
+          ROUND(SUM(r.resale_price)::numeric / NULLIF(SUM(r.floor_area_sqm),0)) AS price_per_sqm
+        FROM resale_transactions r
+        JOIN towns t ON r.town_id = t.town_id
+        JOIN latest_year ly ON DATE_TRUNC('year', r.month) = ly.year_start
+        WHERE t.town_name = $1
+        GROUP BY ly.year_start;
       `;
-    } else if (year) {
-      // SPECIFIC YEAR
-      sql = `
-        SELECT ROUND(SUM(resale_price)::numeric / NULLIF(SUM(floor_area_sqm),0)) AS price_per_sqm
-        FROM resale_transactions
-        WHERE EXTRACT(YEAR FROM month) = $1;
-      `;
-      params = [Number(year)];
+      params = [town];
     } else {
-      // default: ALL YEARS
+      // latest year across all towns
       sql = `
-        SELECT ROUND(SUM(resale_price)::numeric / NULLIF(SUM(floor_area_sqm),0)) AS price_per_sqm
-        FROM resale_transactions;
+        WITH latest_year AS (
+          SELECT MAX(DATE_TRUNC('year', month)) AS year_start
+          FROM resale_transactions
+        )
+        SELECT
+          TO_CHAR(ly.year_start, 'YYYY')::int AS year,
+          ROUND(SUM(r.resale_price)::numeric / NULLIF(SUM(r.floor_area_sqm),0)) AS price_per_sqm
+        FROM resale_transactions r
+        JOIN latest_year ly ON DATE_TRUNC('year', r.month) = ly.year_start
+        GROUP BY ly.year_start;
       `;
     }
 
     const result = await pool.query(sql, params);
+    res.json(result.rows[0] ?? { year: null, price_per_sqm: null });
+  } catch (err) {
+    console.error("price-per-sqm error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+*/
+//4. Total Transactions (supports town, flatType, flatModel)
+app.get("/api/metrics/total-transactions", async (req, res) => {
+  try {
+    const { whereSql, params } = buildFilters(req.query);
+    const result = await pool.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM resale_transactions r
+      LEFT JOIN towns t       ON r.town_id       = t.town_id
+      LEFT JOIN flat_types ft ON r.flat_type_id  = ft.flat_type_id
+      LEFT JOIN flat_models fm ON r.flat_model_id = fm.flat_model_id
+      ${whereSql};
+      `,
+      params
+    );
+    res.json(result.rows[0]); // { total: "233815" }
+  } catch (err) {
+    console.error("total-transactions error", err);
+    res.status(500).json({ error: "db error" });
+  }
+});
+
+
+//5. Average price by town (for bar chart) – respects filters
+app.get("/api/metrics/avg-price-by-town", async (req, res) => {
+  try {
+    const { whereSql, params } = buildFilters(req.query);
+    const result = await pool.query(
+      `
+      SELECT t.town_name,
+             ROUND(AVG(r.resale_price), 0) AS avg_price
+      FROM resale_transactions r
+      LEFT JOIN towns t       ON r.town_id       = t.town_id
+      LEFT JOIN flat_types ft ON r.flat_type_id  = ft.flat_type_id
+      LEFT JOIN flat_models fm ON r.flat_model_id = fm.flat_model_id
+      ${whereSql}
+      GROUP BY t.town_name
+      ORDER BY avg_price DESC;
+      `,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("avg-price-by-town error", err);
+    res.status(500).json({ error: "db error" });
+  }
+});
+
+
+// 6. Yearly trend (for the line chart) – respects filters
+app.get("/api/metrics/yearly-trend", async (req, res) => {
+  try {
+    const { whereSql, params } = buildFilters(req.query);
+    const result = await pool.query(
+      `
+      SELECT
+        DATE_TRUNC('year', r.month) AS year,
+        ROUND(AVG(r.resale_price), 0) AS avg_price,
+        COUNT(*) AS total_txn
+      FROM resale_transactions r
+      LEFT JOIN towns t       ON r.town_id       = t.town_id
+      LEFT JOIN flat_types ft ON r.flat_type_id  = ft.flat_type_id
+      LEFT JOIN flat_models fm ON r.flat_model_id = fm.flat_model_id
+      ${whereSql}
+      GROUP BY DATE_TRUNC('year', r.month)
+      ORDER BY year;
+      `,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("yearly-trend error", err);
+    res.status(500).json({ error: "db error" });
+  }
+});
+
+
+// 7. Price per SQM (ALL years, respects filters)
+app.get("/api/metrics/price-per-sqm", async (req, res) => {
+  try {
+    const { whereSql, params } = buildFilters(req.query);
+    const result = await pool.query(
+      `
+      SELECT ROUND(SUM(r.resale_price)::numeric / NULLIF(SUM(r.floor_area_sqm),0)) AS price_per_sqm
+      FROM resale_transactions r
+      LEFT JOIN towns t       ON r.town_id       = t.town_id
+      LEFT JOIN flat_types ft ON r.flat_type_id  = ft.flat_type_id
+      LEFT JOIN flat_models fm ON r.flat_model_id = fm.flat_model_id
+      ${whereSql};
+      `,
+      params
+    );
     res.json(result.rows[0] ?? { price_per_sqm: null });
   } catch (err) {
     console.error("price-per-sqm error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 
 

@@ -16,6 +16,17 @@ const AdminDashboard = () => {
   const [barData, setBarData] = useState([]);     // for avg price by town
   const [pricePerSqm, setPricePerSqm] = useState(null); // for price per sqm
 
+  const [towns, setTowns] = useState([]);
+  const [selectedTown, setSelectedTown] = useState("");
+
+  const [flatTypes, setFlatTypes] = useState([]);
+  const [selectedFlatType, setSelectedFlatType] = useState("");
+
+  const [flatModels, setFlatModels] = useState([]);
+  const [selectedFlatModel, setSelectedFlatModel] = useState("");
+
+
+
 
 
   useEffect(() => {
@@ -39,17 +50,23 @@ const AdminDashboard = () => {
   .catch(err => console.error("yearly trend error", err));
 
 
-  // 3. Average price by town for bar chart
-  fetch("http://localhost:3001/api/metrics/avg-price-by-town")
-    .then(res => res.json())
-    .then(data => {
-      const formatted = data.map(row => ({
+  // 3. Average price by town for bar chart (GLOBAL, no filters)
+  fetch("http://localhost:3001/api/analytics/avg-price-by-town")
+    .then(async (res) => {
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+      return res.json();
+    })
+    .then((data) => {
+      const formatted = data.map((row) => ({
         town: row.town_name,
-        value: Number(row.avg_price)
+        value: Number(row.avg_price),
       }));
       setBarData(formatted);
     })
-    .catch(err => console.error("Error fetching avg price by town:", err));
+    .catch((err) => console.error("Error fetching avg price by town:", err));
 
 
     // 4. Price per sqm 
@@ -62,6 +79,147 @@ const AdminDashboard = () => {
       });
 
   }, []);
+
+
+  // load dropdown options from SQL
+  useEffect(() => {
+    // towns
+    fetch("http://localhost:3001/api/towns")
+      .then(res => res.json())
+      .then(rows => setTowns(rows.map(r => r.town_name)))
+      .catch(err => console.error("Error loading towns list:", err));
+    /*
+    // flat types
+    fetch("http://localhost:3001/api/flat-types")
+      .then(res => res.json())
+      .then(list => setFlatTypes(list || []))
+      .catch(err => console.error("Error loading flat types:", err));
+
+    // flat models
+    fetch("http://localhost:3001/api/flat-models")
+      .then(res => res.json())
+      .then(list => setFlatModels(list || []))
+      .catch(err => console.error("Error loading flat models:", err));
+      */
+  }, []);
+
+  // when town changes, load valid flat types for that town
+  useEffect(() => {
+    if (!selectedTown) {
+      setFlatTypes([]);
+      setSelectedFlatType("");
+      setFlatModels([]);
+      setSelectedFlatModel("");
+      return;
+    }
+
+    fetch(`http://localhost:3001/api/flat-types?town=${encodeURIComponent(selectedTown)}`)
+      .then(res => res.json())
+      .then(list => {
+        setFlatTypes(list || []);
+        setSelectedFlatType("");
+        setFlatModels([]);
+        setSelectedFlatModel("");
+      })
+      .catch(err => console.error("Error loading flat types:", err));
+  }, [selectedTown]);
+
+
+  // when town + flatType change, load valid flat models
+  useEffect(() => {
+    if (!selectedTown) {
+      setFlatModels([]);
+      setSelectedFlatModel("");
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.append("town", selectedTown);
+    if (selectedFlatType) params.append("flatType", selectedFlatType);
+
+    fetch(`http://localhost:3001/api/flat-models?${params.toString()}`)
+      .then(res => res.json())
+      .then(list => {
+        setFlatModels(list || []);
+        setSelectedFlatModel("");
+      })
+      .catch(err => console.error("Error loading flat models:", err));
+  }, [selectedTown, selectedFlatType]);
+
+
+
+  const handleFilter = () => {
+    const params = new URLSearchParams();
+    // Priority 1: Town
+    if (selectedTown) {
+      params.append("town", selectedTown);
+
+      // Priority 2: Flat Type (only if town is chosen)
+      if (selectedFlatType) {
+        params.append("flatType", selectedFlatType);
+
+        // Priority 3: Flat Model (only if town + type chosen)
+        if (selectedFlatModel) {
+          params.append("flatModel", selectedFlatModel);
+        }
+      }
+    }
+
+    const queryString = params.toString() ? `?${params.toString()}` : "";
+
+    // 1) Total Transactions
+    fetch(`http://localhost:3001/api/metrics/total-transactions${queryString}`)
+      .then(res => res.json())
+      .then(data => setTotalTx(Number(data.total)))
+      .catch(err => console.error("Error fetching total transactions:", err));
+
+
+    // 2) Yearly trend
+    fetch(`http://localhost:3001/api/metrics/yearly-trend${queryString}`)
+      .then(res => res.json())
+      .then(data => {
+        const formatted = (data || []).map(row => ({
+          name: row.year.slice(0, 4),
+          price: Number(row.avg_price),
+        }));
+        setLineData(formatted);
+      })
+      .catch(err => console.error("yearly trend error", err));
+
+
+    // 3) Average price by town (GLOBAL – ignore filters)
+    fetch("http://localhost:3001/api/analytics/avg-price-by-town")
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        const formatted = (data || []).map((row) => ({
+          town: row.town_name,
+          value: Number(row.avg_price),
+        }));
+        setBarData(formatted);
+      })
+      .catch((err) => console.error("Error fetching avg price by town:", err));
+
+
+
+    // 4) Price per SQM
+    fetch(`http://localhost:3001/api/metrics/price-per-sqm${queryString}`)
+      .then(res => res.json())
+      .then(d =>
+        setPricePerSqm(
+          d?.price_per_sqm != null ? Number(d.price_per_sqm) : null
+        )
+      )
+      .catch(err => {
+        console.error("Error fetching price-per-sqm:", err);
+        setPricePerSqm(null);
+      });
+  };
 
 
 
@@ -167,9 +325,59 @@ const AdminDashboard = () => {
           Insights
         </button>
       </div>
-      
       <div className="p-6 grid grid-cols-12 gap-6">
         <div className="col-span-3 bg-white p-4 rounded-xl shadow-sm">
+          <div className="mb-3">
+            <label className="block text-sm font-semibold mb-1">Town</label>
+            <select
+              value={selectedTown}
+              onChange={(e) => setSelectedTown(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm text-gray-600"
+            >
+              <option value="">All Towns</option>
+              {towns.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mb-3">
+            <label className="block text-sm font-semibold mb-1">Flat Type</label>
+            <select
+              value={selectedFlatType}
+              onChange={(e) => setSelectedFlatType(e.target.value)}
+              disabled={!selectedTown}
+              className="w-full border rounded-md px-3 py-2 text-sm text-gray-600 disabled:bg-gray-100 disabled:text-gray-400"
+            >
+              <option value="">All Flat Types</option>
+              {flatTypes.map((ft) => (
+                <option key={ft} value={ft}>
+                  {ft}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mb-3">
+            <label className="block text-sm font-semibold mb-1">Flat Model</label>
+            <select
+              value={selectedFlatModel}
+              onChange={(e) => setSelectedFlatModel(e.target.value)}
+              disabled={!selectedTown || !selectedFlatType}
+              className="w-full border rounded-md px-3 py-2 text-sm text-gray-600 disabled:bg-gray-100 disabled:text-gray-400"
+            >
+              <option value="">All Flat Models</option>
+              {flatModels.map((fm) => (
+                <option key={fm} value={fm}>
+                  {fm}
+                </option>
+              ))}
+            </select>
+          </div>
+
+
+
+{/*
           <div className="mb-3">
             <label className="block text-sm font-semibold mb-1">Town</label>
             <select className="w-full border rounded-md px-3 py-2 text-sm text-gray-600">
@@ -223,6 +431,8 @@ const AdminDashboard = () => {
               <option>Standard</option>
             </select>
           </div>
+*/}
+
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-1">Transaction Year</label>
             <input 
@@ -239,9 +449,12 @@ const AdminDashboard = () => {
               <span>2025</span>
             </div>
           </div>
-          <button className="w-full bg-lime-50 text-gray-700 py-2 rounded-md hover:bg-lime-100">
-            Filter
-          </button>
+        <button
+          onClick={handleFilter}
+          className="w-full bg-lime-50 text-gray-700 py-2 rounded-md hover:bg-lime-100"
+        >
+          Filter
+        </button>
         </div>
         <div className="col-span-9 flex flex-col gap-6">
           <div className="grid grid-cols-4 gap-4">
