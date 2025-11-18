@@ -152,7 +152,7 @@ app.get("/api/flat-models", async (req, res) => {
 
 
 
-
+/*
 // 2. Get resale transactions (optional filter by town)
 app.get("/api/resales", async (req, res) => {
   const { town } = req.query;
@@ -177,6 +177,7 @@ app.get("/api/resales", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
+*/
 
 // 3. Simple analytics: average price by town
 // 3. Average price by town for bar chart (GLOBAL, no filters)
@@ -555,7 +556,7 @@ app.post("/api/resales", async (req, res) => {
         resale_price
       )
       VALUES (
-        CURRENT_DATE,     -- month
+        DATE_TRUNC('month', CURRENT_DATE),     -- month
         $1,               -- town_id
         $2,               -- flat_type_id
         NULL,             -- flat_model_id
@@ -590,6 +591,7 @@ app.post("/api/resales", async (req, res) => {
   }
 });
 
+/*
 // 3. Route to get distinct towns
 app.get("/api/towns", async (req, res) => {
   try {
@@ -603,6 +605,7 @@ app.get("/api/towns", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch towns" });
   }
 });
+
 
 app.get("/api/flat-types", async (req, res) => {
   const { town } = req.query;
@@ -622,6 +625,7 @@ app.get("/api/flat-types", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch flat types" });
   }
 });
+*/
 
 
 
