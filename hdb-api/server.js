@@ -435,11 +435,41 @@ app.get("/api/metrics/price-per-sqm", async (req, res) => {
 //1. list resales for data management table
 app.get("/api/resales/table", async (req, res) => {
   try {
-    const result = await pool.query(`
+    const { q } = req.query;
+    const params = [];
+    let whereSql = "";
+    let limitSql = "LIMIT 200"; // default for no-search mode
+
+    if (q && q.trim()) {
+      const like = `%${q.trim()}%`;
+      params.push(like);
+
+      // Search across ALL important columns (including block & street_name)
+      whereSql = `
+        WHERE 
+          r.resale_id::text ILIKE $1 OR
+          TO_CHAR(r.month, 'YYYY-MM') ILIKE $1 OR
+          t.town_name ILIKE $1 OR
+          r.block ILIKE $1 OR
+          r.street_name ILIKE $1 OR
+          ft.flat_type_name ILIKE $1 OR
+          r.floor_area_sqm::text ILIKE $1 OR
+          (r.storey_min::text || '-' || r.storey_max::text) ILIKE $1 OR
+          r.resale_price::text ILIKE $1 OR
+          r.remaining_lease_years::text ILIKE $1
+      `;
+
+      // When searching, show ALL matches (no LIMIT 200)
+      limitSql = "";
+    }
+
+    const sql = `
       SELECT
         r.resale_id,
         TO_CHAR(r.month, 'YYYY-MM') AS month,
         t.town_name,
+        r.block,
+        r.street_name,
         ft.flat_type_name,
         r.floor_area_sqm,
         r.storey_min,
@@ -449,15 +479,20 @@ app.get("/api/resales/table", async (req, res) => {
       FROM resale_transactions r
       JOIN towns t ON r.town_id = t.town_id
       JOIN flat_types ft ON r.flat_type_id = ft.flat_type_id
-      ORDER BY r.month DESC
-      LIMIT 200;
-    `);
+      ${whereSql}
+      -- stable ordering so repeated searches return the same rows
+      ORDER BY r.month DESC, r.resale_id DESC
+      ${limitSql};
+    `;
+
+    const result = await pool.query(sql, params);
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error("resales/table error:", err);
     res.status(500).json({ error: "db error" });
   }
 });
+
 
 
 // 2. create new resale from admin-data page
@@ -465,9 +500,11 @@ app.post("/api/resales", async (req, res) => {
   try {
     const {
       town,
+      block,
+      streetName,
       price,
       floorArea,
-      floorRange,   // e.g. "10-15"
+      floorRange,
       flatType,
       leaseLeft
     } = req.body;
@@ -522,25 +559,27 @@ app.post("/api/resales", async (req, res) => {
         $1,               -- town_id
         $2,               -- flat_type_id
         NULL,             -- flat_model_id
-        'N/A',            -- block
-        'N/A',            -- street_name
-        $3,               -- storey_min
-        $4,               -- storey_max
-        $5,               -- floor_area_sqm
+        $3,               -- block
+        $4,               -- street_name
+        $5,               -- storey_min
+        $6,               -- storey_max
+        $7,               -- floor_area_sqm
         NULL,             -- lease_commence_year
-        $6,               -- remaining_lease_years
-        $7                -- resale_price
+        $8,               -- remaining_lease_years
+        $9                -- resale_price
       )
       RETURNING *;
       `,
       [
-        town_id,
-        flat_type_id,
-        storey_min,
-        storey_max,
-        floorArea ? Number(floorArea) : null,
-        leaseLeft ? Number(leaseLeft) : null,
-        price ? Number(price) : null,
+        town_id,                       // $1
+        flat_type_id,                  // $2
+        block || "N/A",                // $3
+        streetName || "N/A",           // $4
+        storey_min,                    // $5
+        storey_max,                    // $6
+        floorArea ? Number(floorArea) : null, // $7
+        leaseLeft ? Number(leaseLeft) : null, // $8
+        price ? Number(price) : null,         // $9
       ]
     );
 
@@ -859,76 +898,80 @@ app.get('/api/admin/insights/stats', auth, requireAdmin, async (_req, res) => {
   res.json({ pending, approved, rejected });
 });
 
-// ========== Start server ==========
-const PORT = 3001;
-app.listen(PORT, () => {
-  console.log(`✅ API server running on http://localhost:${PORT}`);
-});
 
 
-
-// District Performance Overview from MongoDB insights
-// Returns up to 10 towns with latest date + avg rating + sentiment
+// --- District Overview: Merge Mongo + PostgreSQL ---
 app.get("/api/insights/district-overview", async (_req, res) => {
   try {
     await initMongo();
 
-    const pipeline = [
-      // only approved insights that have a rating
-      { $match: { status: "approved", rating: { $ne: null } } },
-
-      // newest first so $first gives us latest date
-      { $sort: { date: -1 } },
-
-      // group by town
+    /** 1) MongoDB: Town → Rating summary */
+    const mongoData = await Insights.aggregate([
+      { $match: { status: "approved" }},
       {
         $group: {
           _id: "$town",
-          latestDate: { $first: "$date" },
           avgRating: { $avg: "$rating" },
           count: { $sum: 1 },
-        },
+          latestDate: { $max: "$date" }
+        }
       },
+      { $sort: { latestDate: -1 }}
+    ]).toArray();
 
-      // sort by most recently rated towns
-      { $sort: { latestDate: -1 } },
 
-      // only show up to 10 towns
-      { $limit: 10 },
-    ];
+    /** 2) PostgreSQL: Town → Resale summary */
+    const sqlResult = await pool.query(`
+      SELECT 
+        t.town_name AS town,
+        COUNT(*) AS total_transactions,
+        ROUND(AVG(r.resale_price), 0) AS avg_price,
+        ROUND(SUM(r.resale_price)::numeric / NULLIF(SUM(r.floor_area_sqm),0)) AS price_per_sqm
+      FROM resale_transactions r
+      JOIN towns t ON r.town_id = t.town_id
+      GROUP BY t.town_name
+      ORDER BY t.town_name;
+    `);
 
-    const docs = await Insights.aggregate(pipeline).toArray();
+    const sqlData = sqlResult.rows;
 
-    // map avgRating -> sentiment label
-    const mapped = docs.map((d) => {
-      const avg = d.avgRating ?? 0;
 
-      let sentiment;
-      if (avg < 1.5) {
-        sentiment = "Needs improvement";
-      } else if (avg < 2.5) {
-        sentiment = "Below average";
-      } else if (avg < 3.5) {
-        sentiment = "Average";
-      } else if (avg < 4.5) {
-        sentiment = "Good";
-      } else {
-        sentiment = "Excellent";
-      }
+    /** 3) Merge both Mongo + SQL by town */
+    const merged = sqlData.map(sql => {
+      const m = mongoData.find(x => x._id === sql.town);
 
       return {
-        town: d._id,
-        latestDate: d.latestDate,
-        avgRating: Number(avg.toFixed(1)),
-        sentiment,
-        count: d.count,
+        town: sql.town,
+
+        // SQL insights
+        avgPrice: Number(sql.avg_price),
+        pricePerSqm: Number(sql.price_per_sqm),
+        totalTransactions: Number(sql.total_transactions),
+
+        // Mongo insights
+        avgRating: m ? Number(m.avgRating.toFixed(1)) : null,
+        ratingCount: m ? m.count : 0,
+        latestDate: m ? m.latestDate : null,
+
+        // simple sentiment
+        sentiment: m
+          ? (m.avgRating >= 4 ? "Strong" : m.avgRating >= 3 ? "Neutral" : "Weak")
+          : "No Data"
       };
     });
 
-    res.json(mapped);
+    res.json(merged);
+
   } catch (err) {
-    console.error("district-overview error", err);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("district-overview error:", err);
+    res.status(500).json({ error: "Failed to merge overview data" });
   }
 });
 
+
+
+// ========== Start server ========== should be at the very end ==========
+const PORT = 3001;
+app.listen(PORT, () => {
+  console.log(`✅ API server running on http://localhost:${PORT}`);
+});

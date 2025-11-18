@@ -227,13 +227,14 @@ const AdminDashboard = () => {
   };
 
 
-  // 5. District Overview from Mongo Feedback (load once)
+  // 5. District Overview from Mongo + PSQL
   useEffect(() => {
     fetch("http://localhost:3001/api/insights/district-overview")
-      .then((res) => res.json())
-      .then((data) => setDistrictOverview(data || []))
-      .catch((err) => console.error("District overview error", err));
+      .then(res => res.json())
+      .then(data => setDistrictOverview(data))
+      .catch(err => console.error("District overview error", err));
   }, []);
+
 
   // 6. Update market sentiment when selectedTown or districtOverview changes
   useEffect(() => {
@@ -521,21 +522,28 @@ const AdminDashboard = () => {
             </div>
           </div>
 
-
           <div className="bg-white rounded-xl shadow-sm p-4">
             <h3 className="text-md font-semibold mb-4">District Performance Overview</h3>
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-gray-100 text-left">
                   <th className="py-2 px-3 font-semibold">Town</th>
-                  <th className="py-2 px-3 font-semibold">Date</th>
+                  <th className="py-2 px-3 font-semibold">Latest Feedback</th>
+                  <th className="py-2 px-3 font-semibold">Avg Rating</th>
+                  <th className="py-2 px-3 font-semibold"># Reviews</th>
+                  <th className="py-2 px-3 font-semibold">Avg Price</th>
+                  <th className="py-2 px-3 font-semibold">Price per SQM</th>
+                  <th className="py-2 px-3 font-semibold">Total Transactions</th>
                   <th className="py-2 px-3 font-semibold">Sentiment</th>
                 </tr>
               </thead>
               <tbody>
                 {districtOverview.length === 0 ? (
                   <tr>
-                    <td colSpan="3" className="py-3 px-3 text-gray-500 text-center">
+                    <td
+                      colSpan={8}
+                      className="py-3 px-3 text-gray-500 text-center"
+                    >
                       No feedback data available.
                     </td>
                   </tr>
@@ -543,17 +551,55 @@ const AdminDashboard = () => {
                   districtOverview.map((row, i) => (
                     <tr key={i} className="border-t hover:bg-gray-50">
                       <td className="py-2 px-3">{row.town}</td>
+
+                      {/* Latest feedback date */}
                       <td className="py-2 px-3">
-                        {new Date(row.latestDate).toLocaleDateString("en-SG")}
+                        {row.latestDate
+                          ? new Date(row.latestDate).toLocaleDateString("en-SG")
+                          : "—"}
                       </td>
+
+                      {/* Avg rating like 4.2/5 or "No rating" */}
+                      <td className="py-2 px-3">
+                        {row.avgRating != null
+                          ? `${Number(row.avgRating).toFixed(1)}/5`
+                          : "No rating"}
+                      </td>
+
+                      {/* Number of reviews contributing to this rating */}
+                      <td className="py-2 px-3">
+                        {row.ratingCount != null ? row.ratingCount : 0}
+                      </td>
+
+                      {/* Avg resale price from PSQL */}
+                      <td className="py-2 px-3">
+                        {row.avgPrice != null
+                          ? `SGD ${Number(row.avgPrice).toLocaleString()}`
+                          : "—"}
+                      </td>
+
+                      {/* Price per sqm from PSQL */}
+                      <td className="py-2 px-3">
+                        {row.pricePerSqm != null
+                          ? `SGD ${Number(row.pricePerSqm).toLocaleString()}`
+                          : "—"}
+                      </td>
+
+                      {/* Total transactions from PSQL */}
+                      <td className="py-2 px-3">
+                        {row.totalTransactions != null
+                          ? Number(row.totalTransactions).toLocaleString()
+                          : "—"}
+                      </td>
+                      {/* Sentiment label from combined data */}
                       <td className="py-2 px-3">{row.sentiment}</td>
                     </tr>
                   ))
                 )}
               </tbody>
-
             </table>
           </div>
+
         </div>
       </div>
     </div>

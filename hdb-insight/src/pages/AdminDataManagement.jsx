@@ -1,4 +1,4 @@
-import React, { useState , useEffect} from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaUserCircle, FaSearch, FaPlus, FaTimes } from "react-icons/fa";
 
@@ -7,39 +7,50 @@ export default function AdminDataManagement() {
   const [selectedTab, setSelectedTab] = useState("Data Management");
   const [showModal, setShowModal] = useState(false);
 
-  // NEW: real rows from backend
+  // real rows from backend
   const [tableData, setTableData] = useState([]);
 
   const [formData, setFormData] = useState({
     town: "",
+    block: "",
+    streetName: "",
     price: "",
     floorArea: "",
     floorRange: "",
     flatType: "",
-    leaseLeft: ""
+    leaseLeft: "",
   });
 
+  // search term
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const fetchTableData = async (q = "") => {
+    try {
+      let url = "http://localhost:3001/api/resales/table";
+      if (q && q.trim()) {
+        url += `?q=${encodeURIComponent(q.trim())}`;
+      }
+
+      const res = await fetch(url);
+      const data = await res.json();
+      setTableData(data);
+    } catch (err) {
+      console.error("error loading table:", err);
+    }
+  };
+
   useEffect(() => {
-  fetch("http://localhost:3001/api/resales/table")
-    .then((res) => res.json())
-    .then((data) => setTableData(data))
-    .catch((err) => console.error("error loading table:", err));
+    fetchTableData(); // loads latest 200 on first render
   }, []);
 
-  function useLogout() {
-    const navigate = useNavigate();
-    return () => {
-      localStorage.removeItem("token");
-      localStorage.removeItem("username");
-      localStorage.removeItem("role");
-      navigate("/", { replace: true }); // back to Login
-    };
-  }
+  const handleSearch = () => {
+    fetchTableData(searchTerm); // ask backend to search whole table
+  };
 
   const handleInputChange = (field, value) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [field]: value
+      [field]: value,
     }));
   };
 
@@ -59,19 +70,21 @@ export default function AdminDataManagement() {
         return;
       }
 
-      // 1) it was inserted
+      // 1) inserted
       await res.json();
 
       // 2) refresh table
-      const refreshed = await fetch("http://localhost:3001/api/resales/table").then((r) =>
-        r.json()
-      );
+      const refreshed = await fetch(
+        "http://localhost:3001/api/resales/table"
+      ).then((r) => r.json());
       setTableData(refreshed);
 
       // 3) close + reset
       setShowModal(false);
       setFormData({
         town: "",
+        block: "",
+        streetName: "",
         price: "",
         floorArea: "",
         floorRange: "",
@@ -89,36 +102,69 @@ export default function AdminDataManagement() {
     setShowModal(false);
     setFormData({
       town: "",
+      block: "",
+      streetName: "",
       price: "",
       floorArea: "",
       floorRange: "",
       flatType: "",
-      leaseLeft: ""
+      leaseLeft: "",
     });
   };
 
-  /*
-  const tableData = [
-    { id: "TXN001", month: "Oct 2023", town: "Jurong West", www: "123", foo: "456", price: "520,000", floor: "10-15", type: "4-Room", sentiment: "Neutral" },
-  ];
-  */
+
+  // Filter rows by searchTerm across all columns
+  const filteredData = tableData.filter((row) => {
+    if (!searchTerm.trim()) return true;
+    const q = searchTerm.toLowerCase();
+
+    const valuesToCheck = [
+      row.resale_id,
+      row.month,
+      row.town_name,
+      row.block,
+      row.street_name,
+      row.flat_type_name,
+      row.floor_area_sqm,
+      row.storey_min && row.storey_max ? `${row.storey_min}-${row.storey_max}` : "",
+      row.resale_price,
+      row.remaining_lease_years,
+    ];
+
+    return valuesToCheck.some((val) =>
+      String(val ?? "").toLowerCase().includes(q)
+    );
+  });
+
+
+  function useLogout() {
+    const navigate = useNavigate();
+    return () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("username");
+      localStorage.removeItem("role");
+      navigate("/", { replace: true }); // back to Login
+    };
+  }
 
   const logout = useLogout();
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
       <div className="flex justify-between items-center px-6 py-4 border-b bg-white shadow-sm">
-        <h1 className="text-2xl font-bold text-gray-800">HDB Resale Market Analyzer</h1>
+        <h1 className="text-2xl font-bold text-gray-800">
+          HDB Resale Market Analyzer
+        </h1>
         <button
-        onClick={logout}
-        className="flex items-center space-x-2 text-red-600 font-medium hover:text-red-700 transition"
-        title="Logout"
+          onClick={logout}
+          className="flex items-center space-x-2 text-red-600 font-medium hover:text-red-700 transition"
+          title="Logout"
         >
           <FaUserCircle className="text-xl" />
           <span>Logged in as: Admin</span>
         </button>
       </div>
-      
+
       <div className="flex space-x-6 border-b bg-white px-6">
         <button
           onClick={() => {
@@ -165,7 +211,7 @@ export default function AdminDataManagement() {
 
       <div className="p-6">
         <div className="flex justify-between items-center mb-6">
-          <button 
+          <button
             onClick={() => setShowModal(true)}
             className="flex items-center space-x-2 px-4 py-2 rounded-md transition"
             style={{ backgroundColor: "#EFF2DD", color: "#333" }}
@@ -173,16 +219,25 @@ export default function AdminDataManagement() {
             <FaPlus className="text-sm" />
             <span>Add New Transaction</span>
           </button>
-          
+
           <div className="flex items-center bg-white rounded-md px-4 py-2 border border-gray-200 w-80">
-            <FaSearch className="text-gray-400 mr-3" />
+            <FaSearch
+              className="text-gray-400 mr-3 cursor-pointer"
+              onClick={handleSearch}
+            />
             <input
               type="text"
               placeholder="Search by Transaction ID, Town, etc."
               className="flex-1 outline-none bg-transparent text-sm"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSearch();
+              }}
             />
           </div>
         </div>
+
         <div className="bg-white rounded-md shadow-sm overflow-x-auto">
           <table className="min-w-full text-sm border-collapse">
             <thead>
@@ -190,71 +245,64 @@ export default function AdminDataManagement() {
                 <th className="py-3 px-6 font-semibold">Transaction ID</th>
                 <th className="py-3 px-6 font-semibold">Month</th>
                 <th className="py-3 px-6 font-semibold">Town</th>
+                <th className="py-3 px-6 font-semibold">Block</th>
+                <th className="py-3 px-6 font-semibold">Street Name</th>
                 <th className="py-3 px-6 font-semibold">Flat Type</th>
                 <th className="py-3 px-6 font-semibold">Area SqM</th>
                 <th className="py-3 px-6 font-semibold">Floor Range</th>
                 <th className="py-3 px-6 font-semibold">Pricing</th>
                 <th className="py-3 px-6 font-semibold">Remaining Lease</th>
-                {/*<th className="py-3 px-6 font-semibold">Sentiment</th>*/}
               </tr>
             </thead>
-{/*
-            <tbody>
-              {tableData.map((row, i) => (
-                <tr
-                  key={i}
-                  className={`${
-                    i === 0 ? "bg-blue-50" : i % 2 === 0 ? "bg-[#f8faee]" : "bg-white"
-                  } border-b hover:bg-gray-50 cursor-pointer`}
-                >
-                  <td className="py-2 px-6 text-gray-600">{row.id}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.month}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.town}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.www}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.foo}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.price}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.floor}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.type}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.sentiment}</td>
-                </tr>
-              ))}
-            </tbody>
-*/}
 
             <tbody>
-              {tableData.map((row, i) => (
+              {filteredData.map((row, i) => (
                 <tr
                   key={row.resale_id}
                   className={`${
-                    i === 0 ? "bg-blue-50" : i % 2 === 0 ? "bg-[#f8faee]" : "bg-white"
+                    i === 0
+                      ? "bg-blue-50"
+                      : i % 2 === 0
+                      ? "bg-[#f8faee]"
+                      : "bg-white"
                   } border-b hover:bg-gray-50 cursor-pointer`}
                 >
                   <td className="py-2 px-6 text-gray-600">{row.resale_id}</td>
                   <td className="py-2 px-6 text-gray-600">{row.month}</td>
                   <td className="py-2 px-6 text-gray-600">{row.town_name}</td>
+                  <td className="py-2 px-6 text-gray-600">{row.block}</td>
+                  <td className="py-2 px-6 text-gray-600">{row.street_name}</td>
                   <td className="py-2 px-6 text-gray-600">{row.flat_type_name}</td>
                   <td className="py-2 px-6 text-gray-600">{row.floor_area_sqm}</td>
                   <td className="py-2 px-6 text-gray-600">
-                    {row.storey_min && row.storey_max ? `${row.storey_min}-${row.storey_max}` : "—"}
+                    {row.storey_min && row.storey_max
+                      ? `${row.storey_min}-${row.storey_max}`
+                      : "—"}
                   </td>
                   <td className="py-2 px-6 text-gray-600">
-                    {row.resale_price ? row.resale_price.toLocaleString() : "—"}
+                    {row.resale_price
+                      ? row.resale_price.toLocaleString()
+                      : "—"}
                   </td>
                   <td className="py-2 px-6 text-gray-600">
-                    {row.remaining_lease_years ? row.remaining_lease_years : "—"}
+                    {row.remaining_lease_years
+                      ? row.remaining_lease_years
+                      : "—"}
                   </td>
                 </tr>
               ))}
             </tbody>
-
           </table>
         </div>
       </div>
+
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-96 border border-blue-200">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-gray-800">Add New Transaction</h2>
+              <h2 className="text-lg font-semibold text-gray-800">
+                Add New Transaction
+              </h2>
               <button
                 onClick={handleCloseModal}
                 className="text-gray-400 hover:text-gray-600"
@@ -264,11 +312,14 @@ export default function AdminDataManagement() {
             </div>
 
             <div className="space-y-4">
+              {/* Town */}
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-600 w-24">Town</label>
+                <label className="text-sm font-medium text-gray-600 w-24">
+                  Town
+                </label>
                 <select
                   value={formData.town}
-                  onChange={(e) => handleInputChange('town', e.target.value)}
+                  onChange={(e) => handleInputChange("town", e.target.value)}
                   className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Town</option>
@@ -286,36 +337,81 @@ export default function AdminDataManagement() {
                 </select>
               </div>
 
+              {/* Block */}
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-600 w-24">Price</label>
+                <label className="text-sm font-medium text-gray-600 w-24">
+                  Block
+                </label>
+                <input
+                  type="text"
+                  value={formData.block}
+                  onChange={(e) => handleInputChange("block", e.target.value)}
+                  placeholder="e.g. 123"
+                  className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Street Name */}
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-gray-600 w-24">
+                  Street
+                </label>
+                <input
+                  type="text"
+                  value={formData.streetName}
+                  onChange={(e) =>
+                    handleInputChange("streetName", e.target.value)
+                  }
+                  placeholder="Street name"
+                  className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Price */}
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-gray-600 w-24">
+                  Price
+                </label>
                 <input
                   type="text"
                   value={formData.price}
-                  onChange={(e) => handleInputChange('price', e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("price", e.target.value)
+                  }
                   placeholder="Price"
                   className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
+              {/* Floor Area */}
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-600 w-24">Floor Area(sqm)</label>
+                <label className="text-sm font-medium text-gray-600 w-24">
+                  Floor Area(sqm)
+                </label>
                 <input
                   type="text"
                   value={formData.floorArea}
-                  onChange={(e) => handleInputChange('floorArea', e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("floorArea", e.target.value)
+                  }
                   placeholder="sqm"
                   className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
+              {/* Floor Range */}
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-600 w-24">Floor Range</label>
+                <label className="text-sm font-medium text-gray-600 w-24">
+                  Floor Range
+                </label>
                 <select
                   value={formData.floorRange}
-                  onChange={(e) => handleInputChange('floorRange', e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("floorRange", e.target.value)
+                  }
                   className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">sqm</option>
+                  <option value="">storey</option>
                   <option value="01-05">01-05</option>
                   <option value="06-10">06-10</option>
                   <option value="11-15">11-15</option>
@@ -325,14 +421,19 @@ export default function AdminDataManagement() {
                 </select>
               </div>
 
+              {/* Flat Type */}
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-600 w-24">Flat Type</label>
+                <label className="text-sm font-medium text-gray-600 w-24">
+                  Flat Type
+                </label>
                 <select
                   value={formData.flatType}
-                  onChange={(e) => handleInputChange('flatType', e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("flatType", e.target.value)
+                  }
                   className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">sqm</option>
+                  <option value="">type</option>
                   <option value="2-Room">2-Room</option>
                   <option value="3-Room">3-Room</option>
                   <option value="4-Room">4-Room</option>
@@ -341,13 +442,18 @@ export default function AdminDataManagement() {
                 </select>
               </div>
 
+              {/* Lease Left */}
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-600 w-24">Lease left</label>
+                <label className="text-sm font-medium text-gray-600 w-24">
+                  Lease left
+                </label>
                 <input
                   type="text"
                   value={formData.leaseLeft}
-                  onChange={(e) => handleInputChange('leaseLeft', e.target.value)}
-                  placeholder="sqm"
+                  onChange={(e) =>
+                    handleInputChange("leaseLeft", e.target.value)
+                  }
+                  placeholder="years"
                   className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
