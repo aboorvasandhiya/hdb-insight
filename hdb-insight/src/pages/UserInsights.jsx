@@ -18,6 +18,9 @@ export default function Insights() {
   const [town, setTown] = useState("");
   const [factor, setFactor] = useState("");
 
+  // list of towns from SQL
+  const [townOptions, setTownOptions] = useState([]);
+
   // lists
   const [posts, setPosts] = useState([]);      // Community (approved)
   const [myPosts, setMyPosts] = useState([]);  // Mine (pending+approved)
@@ -55,6 +58,22 @@ export default function Insights() {
       .then((docs) => setMyPosts((docs || []).map(mapDoc)))
       .catch(() => setMyPosts([]));
   }, []);
+
+  // Load town list for dropdown
+  useEffect(() => {
+    fetch(`${API}/api/towns`)
+      .then((res) => res.json())
+      .then((rows) => {
+        // rows = [{ town_id, town_name, ... }]
+        const names = rows.map((r) => r.town_name);
+        setTownOptions(names);
+      })
+      .catch((err) => {
+        console.error("Error loading towns for insights:", err);
+        setTownOptions([]);
+      });
+  }, []);
+
 
   // Submit a post
   const handlePost = async () => {
@@ -263,21 +282,13 @@ export default function Insights() {
             className="w-full border rounded-md px-3 py-2 text-sm text-gray-600 mb-3"
           >
             <option value="">Select a Town</option>
-            {[
-              "Ang Mo Kio",
-              "Bedok",
-              "Bishan",
-              "Bukit Merah",
-              "Bukit Timah",
-              "Jurong West",
-              "Macpherson",
-              "Yishun",
-            ].map((t) => (
+            {townOptions.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>
             ))}
           </select>
+
 
           <label className="block text-sm font-semibold mb-1">Town Rating</label>
           <div className="flex items-center mb-3">

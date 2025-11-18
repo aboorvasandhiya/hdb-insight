@@ -551,6 +551,40 @@ app.post("/api/resales", async (req, res) => {
   }
 });
 
+// 3. Route to get distinct towns
+app.get("/api/towns", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT DISTINCT town FROM resale_flats ORDER BY town"
+    );
+    // send just the list of town strings
+    res.json(result.rows.map((row) => row.town));
+  } catch (err) {
+    console.error("Error fetching towns:", err);
+    res.status(500).json({ error: "Failed to fetch towns" });
+  }
+});
+
+app.get("/api/flat-types", async (req, res) => {
+  const { town } = req.query;
+
+  if (!town) {
+    return res.status(400).json({ error: "town is required" });
+  }
+
+  try {
+    const result = await pool.query(
+      "SELECT DISTINCT flat_type FROM resale_flats WHERE town = $1 ORDER BY flat_type",
+      [town]
+    );
+    res.json(result.rows.map((row) => row.flat_type));
+  } catch (err) {
+    console.error("Error fetching flat types:", err);
+    res.status(500).json({ error: "Failed to fetch flat types" });
+  }
+});
+
+
 
 // ===== MongoDB users + insights =====
 dotenv.config();
@@ -830,3 +864,71 @@ const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`✅ API server running on http://localhost:${PORT}`);
 });
+
+
+
+// District Performance Overview from MongoDB insights
+// Returns up to 10 towns with latest date + avg rating + sentiment
+app.get("/api/insights/district-overview", async (_req, res) => {
+  try {
+    await initMongo();
+
+    const pipeline = [
+      // only approved insights that have a rating
+      { $match: { status: "approved", rating: { $ne: null } } },
+
+      // newest first so $first gives us latest date
+      { $sort: { date: -1 } },
+
+      // group by town
+      {
+        $group: {
+          _id: "$town",
+          latestDate: { $first: "$date" },
+          avgRating: { $avg: "$rating" },
+          count: { $sum: 1 },
+        },
+      },
+
+      // sort by most recently rated towns
+      { $sort: { latestDate: -1 } },
+
+      // only show up to 10 towns
+      { $limit: 10 },
+    ];
+
+    const docs = await Insights.aggregate(pipeline).toArray();
+
+    // map avgRating -> sentiment label
+    const mapped = docs.map((d) => {
+      const avg = d.avgRating ?? 0;
+
+      let sentiment;
+      if (avg < 1.5) {
+        sentiment = "Needs improvement";
+      } else if (avg < 2.5) {
+        sentiment = "Below average";
+      } else if (avg < 3.5) {
+        sentiment = "Average";
+      } else if (avg < 4.5) {
+        sentiment = "Good";
+      } else {
+        sentiment = "Excellent";
+      }
+
+      return {
+        town: d._id,
+        latestDate: d.latestDate,
+        avgRating: Number(avg.toFixed(1)),
+        sentiment,
+        count: d.count,
+      };
+    });
+
+    res.json(mapped);
+  } catch (err) {
+    console.error("district-overview error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+

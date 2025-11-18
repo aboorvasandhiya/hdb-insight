@@ -4,8 +4,8 @@ import { Link, useNavigate } from "react-router-dom";
 
 export default function Login() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState("admin"); 
-  const [password, setPassword] = useState("admin");
+  const [username, setUsername] = useState(""); //admin
+  const [password, setPassword] = useState(""); //admin
   const [error, setError] = useState("");
 
   const handleSubmit = async (e) => {
@@ -53,7 +53,7 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="max-w-xs mx-auto">
           <input
             className="w-full mb-3 px-3 py-2 text-sm rounded border border-gray-200 bg-gray-50 placeholder-gray-400"
-            placeholder="Username/ Email"
+            placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />

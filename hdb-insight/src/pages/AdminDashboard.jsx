@@ -25,6 +25,11 @@ const AdminDashboard = () => {
   const [flatModels, setFlatModels] = useState([]);
   const [selectedFlatModel, setSelectedFlatModel] = useState("");
 
+  //mongodb
+  const [districtOverview, setDistrictOverview] = useState([]);  //district performance overview
+  const [marketSentiment, setMarketSentiment] = useState("");    //market sentiment
+
+
 
 
 
@@ -222,9 +227,44 @@ const AdminDashboard = () => {
   };
 
 
+  // 5. District Overview from Mongo Feedback (load once)
+  useEffect(() => {
+    fetch("http://localhost:3001/api/insights/district-overview")
+      .then((res) => res.json())
+      .then((data) => setDistrictOverview(data || []))
+      .catch((err) => console.error("District overview error", err));
+  }, []);
+
+  // 6. Update market sentiment when selectedTown or districtOverview changes
+  useEffect(() => {
+    // No town selected yet
+    if (!selectedTown) {
+      setMarketSentiment("Select a Town");
+      return;
+    }
+
+    // Find that town in the overview data (top 10 recent towns)
+    const entry = districtOverview.find(
+      (row) => row.town.toLowerCase() === selectedTown.toLowerCase()
+    );
+
+    if (!entry || entry.avgRating == null || entry.count === 0) {
+      setMarketSentiment("No Feedback");
+      return;
+    }
+
+    // Example text: "Strong (4.2/5)"
+    const avg = Number(entry.avgRating).toFixed(1);
+    const label = entry.sentiment || "Neutral";
+
+    setMarketSentiment(`${label} (${avg}/5)`);
+  }, [selectedTown, districtOverview]);
 
 
 
+
+
+  //LOGOUT FUNCTION
   function useLogout() {
     const navigate = useNavigate();
     return () => {
@@ -234,6 +274,8 @@ const AdminDashboard = () => {
       navigate("/", { replace: true }); // back to Login
     };
   }
+
+
 
   /*
   const lineData = [
@@ -254,7 +296,7 @@ const AdminDashboard = () => {
     { town: "Bedok", value: 580000 },
     { town: "Jurong West", value: 520000 },
   ];
-  */
+  
 
   const tableData = [
     { town: "Central Blk 123", date: "16/10/23", sentiment: "High Demand" },
@@ -265,6 +307,7 @@ const AdminDashboard = () => {
     { town: "Bedok Blk 987", date: "11/10/23", sentiment: "Affordable Option" },
     { town: "Jurong West Blk 147", date: "10/10/23", sentiment: "Value Buy" },
   ];
+  */
 
   const logout = useLogout();
 
@@ -374,81 +417,7 @@ const AdminDashboard = () => {
               ))}
             </select>
           </div>
-
-
-
-{/*
-          <div className="mb-3">
-            <label className="block text-sm font-semibold mb-1">Town</label>
-            <select className="w-full border rounded-md px-3 py-2 text-sm text-gray-600">
-              <option value="">Select a Town</option>
-              <option value="Ang Mo Kio">Ang Mo Kio</option>
-              <option value="Bedok">Bedok</option>
-              <option value="Bishan">Bishan</option>
-              <option value="Bukit Merah">Bukit Merah</option>
-              <option value="Bukit Timah">Bukit Timah</option>
-              <option value="Central">Central</option>
-              <option value="Clementi">Clementi</option>
-              <option value="Geylang">Geylang</option>
-              <option value="Kallang/Whampoa">Kallang/Whampoa</option>
-              <option value="Marine Parade">Marine Parade</option>
-              <option value="Pasir Ris">Pasir Ris</option>
-              <option value="Queenstown">Queenstown</option>
-              <option value="Serangoon">Serangoon</option>
-              <option value="Tampines">Tampines</option>
-              <option value="Toa Payoh">Toa Payoh</option>
-              <option value="Bukit Batok">Bukit Batok</option>
-              <option value="Bukit Panjang">Bukit Panjang</option>
-              <option value="Choa Chu Kang">Choa Chu Kang</option>
-              <option value="Hougang">Hougang</option>
-              <option value="Jurong East">Jurong East</option>
-              <option value="Jurong West">Jurong West</option>
-              <option value="Punggol">Punggol</option>
-              <option value="Sembawang">Sembawang</option>
-              <option value="Sengkang">Sengkang</option>
-              <option value="Tengah">Tengah</option>
-              <option value="Woodlands">Woodlands</option>
-              <option value="Yishun">Yishun</option>
-            </select>
-          </div>
-          <div className="mb-3">
-            <label className="block text-sm font-semibold mb-1">Flat Type</label>
-            <select className="w-full border rounded-md px-3 py-2 text-sm text-gray-600">
-              <option>Flat Type</option>
-              <option>2-Room</option>
-              <option>4-Room Flexi</option>
-              <option>5-Room</option>
-              <option>EXEC Apartment</option>
-            </select>
-          </div>
-          <div className="mb-3">
-            <label className="block text-sm font-semibold mb-1">Flat Model</label>
-            <select className="w-full border rounded-md px-3 py-2 text-sm text-gray-600">
-              <option>Flat Model</option>
-              <option>Improved</option>
-              <option>New Generation</option>
-              <option>DBSS</option>
-              <option>Standard</option>
-            </select>
-          </div>
-*/}
-
-          <div className="mb-4">
-            <label className="block text-sm font-semibold mb-1">Transaction Year</label>
-            <input 
-              type="range" 
-              min="2000" 
-              max="2025" 
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-              className="w-full accent-red-400 mb-2" 
-            />
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>2000</span>
-              <span className="font-semibold text-red-500">{selectedYear}</span>
-              <span>2025</span>
-            </div>
-          </div>
+ 
         <button
           onClick={handleFilter}
           className="w-full bg-lime-50 text-gray-700 py-2 rounded-md hover:bg-lime-100"
@@ -474,7 +443,10 @@ const AdminDashboard = () => {
                   ? "SGD " + pricePerSqm.toLocaleString()
                   : "—",
               },
-              { label: "Market Sentiment", value: "Bullish" },
+              {
+                label: "Market Sentiment",
+                value: marketSentiment || "Select a town",
+              },
             ].map((item) => (
               <div key={item.label} className="bg-white shadow-sm rounded-xl p-4 text-center">
                 <p className="text-sm text-gray-500">{item.label}</p>
@@ -561,14 +533,25 @@ const AdminDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {tableData.map((row, i) => (
-                  <tr key={i} className="border-t hover:bg-gray-50">
-                    <td className="py-2 px-3">{row.town}</td>
-                    <td className="py-2 px-3">{row.date}</td>
-                    <td className="py-2 px-3">{row.sentiment}</td>
+                {districtOverview.length === 0 ? (
+                  <tr>
+                    <td colSpan="3" className="py-3 px-3 text-gray-500 text-center">
+                      No feedback data available.
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  districtOverview.map((row, i) => (
+                    <tr key={i} className="border-t hover:bg-gray-50">
+                      <td className="py-2 px-3">{row.town}</td>
+                      <td className="py-2 px-3">
+                        {new Date(row.latestDate).toLocaleDateString("en-SG")}
+                      </td>
+                      <td className="py-2 px-3">{row.sentiment}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
+
             </table>
           </div>
         </div>
