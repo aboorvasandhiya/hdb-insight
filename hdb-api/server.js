@@ -723,14 +723,23 @@ app.post("/api/insights", auth, async (req, res) => {
   res.json({ insertedId: r.insertedId, status: "pending" });
 });
 
-app.get("/api/insights", async (_req, res) => {
+app.get("/api/insights", async (req, res) => {
   await initMongo();
-  const docs = await Insights.find({ status: "approved" })
+  const { town } = req.query;
+
+  const filter = { status: "approved" };
+  if (town) {
+    filter.town = { $regex: `^${town}$`, $options: "i" }; // strict to that town
+  }
+
+  const docs = await Insights.find(filter)
     .sort({ date: -1 })
     .limit(100)
     .toArray();
+
   res.json(docs);
 });
+
 
 app.get("/api/insights/mine", auth, async (req, res) => {
   await initMongo();
