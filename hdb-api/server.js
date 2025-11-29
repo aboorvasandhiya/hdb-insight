@@ -495,7 +495,6 @@ app.get("/api/resales/table", async (req, res) => {
 });
 
 
-
 // 2. create new resale from admin-data page
 app.post("/api/resales", async (req, res) => {
   try {
@@ -510,16 +509,17 @@ app.post("/api/resales", async (req, res) => {
       leaseLeft
     } = req.body;
 
-    // 1) look up town_id and flat_type_id
+    // town lookup (case-insensitive)
     const townRes = await pool.query(
-      "SELECT town_id FROM towns WHERE town_name = $1",
-      [town]
+      "SELECT town_id FROM towns WHERE town_name ILIKE $1",
+      [town.trim()]
     );
     if (townRes.rows.length === 0) {
       return res.status(400).json({ error: "Unknown town" });
     }
     const town_id = townRes.rows[0].town_id;
 
+    // flat type lookup
     const ftRes = await pool.query(
       "SELECT flat_type_id FROM flat_types WHERE flat_type_name = $1",
       [flatType]
@@ -529,7 +529,7 @@ app.post("/api/resales", async (req, res) => {
     }
     const flat_type_id = ftRes.rows[0].flat_type_id;
 
-    // 2) parse floor range "10-15"
+    // parse floor range ("01-05")
     let storey_min = null;
     let storey_max = null;
     if (floorRange && floorRange.includes("-")) {
@@ -538,7 +538,6 @@ app.post("/api/resales", async (req, res) => {
       storey_max = parseInt(maxStr, 10);
     }
 
-    // 3) insert
     const insertRes = await pool.query(
       `
       INSERT INTO resale_transactions (
@@ -553,34 +552,36 @@ app.post("/api/resales", async (req, res) => {
         floor_area_sqm,
         lease_commence_year,
         remaining_lease_years,
-        resale_price
+        resale_price,
+        is_manual                    -- NEW
       )
       VALUES (
-        DATE_TRUNC('month', CURRENT_DATE),     -- month
-        $1,               -- town_id
-        $2,               -- flat_type_id
-        NULL,             -- flat_model_id
-        $3,               -- block
-        $4,               -- street_name
-        $5,               -- storey_min
-        $6,               -- storey_max
-        $7,               -- floor_area_sqm
-        NULL,             -- lease_commence_year
-        $8,               -- remaining_lease_years
-        $9                -- resale_price
+        DATE_TRUNC('month', CURRENT_DATE),
+        $1,
+        $2,
+        NULL,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        NULL,
+        $8,
+        $9,
+        TRUE                         -- NEW: mark as manual
       )
       RETURNING *;
       `,
       [
-        town_id,                       // $1
-        flat_type_id,                  // $2
-        block || "N/A",                // $3
-        streetName || "N/A",           // $4
-        storey_min,                    // $5
-        storey_max,                    // $6
-        floorArea ? Number(floorArea) : null, // $7
-        leaseLeft ? Number(leaseLeft) : null, // $8
-        price ? Number(price) : null,         // $9
+        town_id,
+        flat_type_id,
+        block || "N/A",
+        streetName || "N/A",
+        storey_min,
+        storey_max,
+        floorArea ? Number(floorArea) : null,
+        leaseLeft ? Number(leaseLeft) : null,
+        price ? Number(price) : null,
       ]
     );
 
@@ -590,6 +591,39 @@ app.post("/api/resales", async (req, res) => {
     res.status(500).json({ error: "db error" });
   }
 });
+
+
+// NEW: get only manually-added transactions
+app.get("/api/resales/manual", async (req, res) => {
+  try {
+    const sql = `
+      SELECT
+        r.resale_id,
+        TO_CHAR(r.month, 'YYYY-MM') AS month,
+        t.town_name,
+        r.block,
+        r.street_name,
+        ft.flat_type_name,
+        r.floor_area_sqm,
+        r.storey_min,
+        r.storey_max,
+        r.resale_price,
+        r.remaining_lease_years
+      FROM resale_transactions r
+      JOIN towns t       ON r.town_id = t.town_id
+      JOIN flat_types ft ON r.flat_type_id = ft.flat_type_id
+      WHERE r.is_manual = TRUE
+      ORDER BY r.month DESC, r.resale_id DESC;
+    `;
+    const result = await pool.query(sql);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("resales/manual error:", err);
+    res.status(500).json({ error: "db error" });
+  }
+});
+
+
 
 /*
 // 3. Route to get distinct towns

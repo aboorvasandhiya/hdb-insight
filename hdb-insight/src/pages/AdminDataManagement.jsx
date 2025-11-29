@@ -7,8 +7,16 @@ export default function AdminDataManagement() {
   const [selectedTab, setSelectedTab] = useState("Data Management");
   const [showModal, setShowModal] = useState(false);
 
-  // real rows from backend
+  // real rows from backend (All)
   const [tableData, setTableData] = useState([]);
+
+  // NEW — manual rows loaded from DB (not local)
+  const [manualData, setManualData] = useState([]);
+
+  const [viewMode, setViewMode] = useState("all");
+
+
+
 
   const [formData, setFormData] = useState({
     town: "",
@@ -23,6 +31,9 @@ export default function AdminDataManagement() {
 
   // search term
   const [searchTerm, setSearchTerm] = useState("");
+
+  // ---------- NEW: state for towns dropdown ----------
+  const [townOptions, setTownOptions] = useState([]);
 
   const fetchTableData = async (q = "") => {
     try {
@@ -39,12 +50,39 @@ export default function AdminDataManagement() {
     }
   };
 
+  // NEW: fetch manual data from backend
+  const fetchManualData = async () => {
+    try {
+      const res = await fetch("http://localhost:3001/api/resales/manual");
+      const data = await res.json();
+      setManualData(data);
+    } catch (err) {
+      console.error("error loading manual rows:", err);
+    }
+  };
+
+
+  // Load towns + initial table
   useEffect(() => {
+    const loadTowns = async () => {
+      try {
+        const res = await fetch("http://localhost:3001/api/towns");
+        const data = await res.json(); // [{town_id, town_name}]
+        setTownOptions(data);
+      } catch (err) {
+        console.error("Failed to load towns", err);
+      }
+    };
+
+    loadTowns();
     fetchTableData(); // loads latest 200 on first render
+    fetchManualData();   // NEW: load manual rows from backend
   }, []);
 
   const handleSearch = () => {
-    fetchTableData(searchTerm); // ask backend to search whole table
+    // backend search for ALL rows
+    fetchTableData(searchTerm);
+    // frontend filter will also apply to myNewRows
   };
 
   const handleInputChange = (field, value) => {
@@ -70,16 +108,20 @@ export default function AdminDataManagement() {
         return;
       }
 
-      // 1) inserted
       await res.json();
 
-      // 2) refresh table
+      // reload from DB:
+      fetchTableData();
+      fetchManualData();
+
+
+      // 3) refresh full table for "All" view
       const refreshed = await fetch(
         "http://localhost:3001/api/resales/table"
       ).then((r) => r.json());
       setTableData(refreshed);
 
-      // 3) close + reset
+      // 4) close + reset
       setShowModal(false);
       setFormData({
         town: "",
@@ -97,7 +139,6 @@ export default function AdminDataManagement() {
     }
   };
 
-
   const handleCloseModal = () => {
     setShowModal(false);
     setFormData({
@@ -112,30 +153,56 @@ export default function AdminDataManagement() {
     });
   };
 
-
-  // Filter rows by searchTerm across all columns
-  const filteredData = tableData.filter((row) => {
-    if (!searchTerm.trim()) return true;
+  // ------------ filtering helper (used for both all + myNew) ------------
+  const applySearchFilter = (rows) => {
+    if (!searchTerm.trim()) return rows;
     const q = searchTerm.toLowerCase();
 
-    const valuesToCheck = [
-      row.resale_id,
-      row.month,
-      row.town_name,
-      row.block,
-      row.street_name,
-      row.flat_type_name,
-      row.floor_area_sqm,
-      row.storey_min && row.storey_max ? `${row.storey_min}-${row.storey_max}` : "",
-      row.resale_price,
-      row.remaining_lease_years,
-    ];
+    return rows.filter((row) => {
+      const valuesToCheck = [
+        row.resale_id,
+        row.month,
+        row.town_name,
+        row.block,
+        row.street_name,
+        row.flat_type_name,
+        row.floor_area_sqm,
+        row.storey_min && row.storey_max
+          ? `${row.storey_min}-${row.storey_max}`
+          : "",
+        row.resale_price,
+        row.remaining_lease_years,
+      ];
 
-    return valuesToCheck.some((val) =>
-      String(val ?? "").toLowerCase().includes(q)
-    );
-  });
+      return valuesToCheck.some((val) =>
+        String(val ?? "").toLowerCase().includes(q)
+      );
+    });
+  };
 
+  // helper at top of component
+  const formatMonth = (value) => {
+    if (!value) return "—";
+    // if it's already "YYYY-MM", just return
+    if (/^\d{4}-\d{2}$/.test(value)) return value;
+
+    const d = new Date(value);
+    if (isNaN(d)) return value; // fallback
+
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
+  };
+
+
+  const filteredAllData = applySearchFilter(tableData);
+  const filteredMyData = applySearchFilter(manualData); // NEW from database
+
+  const dataToDisplay =
+    viewMode === "all" ? filteredAllData : filteredMyData;
+
+
+  // -----------------------------------------------------------------------
 
   function useLogout() {
     const navigate = useNavigate();
@@ -211,15 +278,40 @@ export default function AdminDataManagement() {
 
       <div className="p-6">
         <div className="flex justify-between items-center mb-6">
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center space-x-2 px-4 py-2 rounded-md transition"
-            style={{ backgroundColor: "#EFF2DD", color: "#333" }}
-          >
-            <FaPlus className="text-sm" />
-            <span>Add New Transaction</span>
-          </button>
+          {/* LEFT SIDE: view toggle + add button */}
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setViewMode("all")}
+              className={`px-3 py-2 rounded-md text-sm border ${
+                viewMode === "all"
+                  ? "bg-red-100 border-red-300 text-red-700"
+                  : "bg-white border-gray-300 text-gray-600"
+              }`}
+            >
+              All Transactions
+            </button>
+            <button
+              onClick={() => setViewMode("mine")}
+              className={`px-3 py-2 rounded-md text-sm border ${
+                viewMode === "mine"
+                  ? "bg-green-100 border-green-300 text-green-700"
+                  : "bg-white border-gray-300 text-gray-600"
+              }`}
+            >
+              My New Transactions
+            </button>
 
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center space-x-2 px-4 py-2 rounded-md transition"
+              style={{ backgroundColor: "#EFF2DD", color: "#333" }}
+            >
+              <FaPlus className="text-sm" />
+              <span>Add New Transaction</span>
+            </button>
+          </div>
+
+          {/* RIGHT SIDE: search */}
           <div className="flex items-center bg-white rounded-md px-4 py-2 border border-gray-200 w-80">
             <FaSearch
               className="text-gray-400 mr-3 cursor-pointer"
@@ -256,7 +348,7 @@ export default function AdminDataManagement() {
             </thead>
 
             <tbody>
-              {filteredData.map((row, i) => (
+              {dataToDisplay.map((row, i) => (
                 <tr
                   key={row.resale_id}
                   className={`${
@@ -268,12 +360,18 @@ export default function AdminDataManagement() {
                   } border-b hover:bg-gray-50 cursor-pointer`}
                 >
                   <td className="py-2 px-6 text-gray-600">{row.resale_id}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.month}</td>
+                  <td className="py-2 px-6 text-gray-600">{formatMonth(row.month)}</td>
                   <td className="py-2 px-6 text-gray-600">{row.town_name}</td>
                   <td className="py-2 px-6 text-gray-600">{row.block}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.street_name}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.flat_type_name}</td>
-                  <td className="py-2 px-6 text-gray-600">{row.floor_area_sqm}</td>
+                  <td className="py-2 px-6 text-gray-600">
+                    {row.street_name}
+                  </td>
+                  <td className="py-2 px-6 text-gray-600">
+                    {row.flat_type_name}
+                  </td>
+                  <td className="py-2 px-6 text-gray-600">
+                    {row.floor_area_sqm}
+                  </td>
                   <td className="py-2 px-6 text-gray-600">
                     {row.storey_min && row.storey_max
                       ? `${row.storey_min}-${row.storey_max}`
@@ -291,6 +389,18 @@ export default function AdminDataManagement() {
                   </td>
                 </tr>
               ))}
+
+              {/* If in "My New" mode and nothing there, show a small message */}
+              {viewMode === "mine" && dataToDisplay.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={10}
+                    className="py-4 px-6 text-center text-gray-400 italic"
+                  >
+                    No new transactions added in this session yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -323,17 +433,11 @@ export default function AdminDataManagement() {
                   className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Town</option>
-                  <option value="Ang Mo Kio">Ang Mo Kio</option>
-                  <option value="Bedok">Bedok</option>
-                  <option value="Bishan">Bishan</option>
-                  <option value="Bukit Merah">Bukit Merah</option>
-                  <option value="Bukit Timah">Bukit Timah</option>
-                  <option value="Central">Central</option>
-                  <option value="Clementi">Clementi</option>
-                  <option value="Geylang">Geylang</option>
-                  <option value="Jurong West">Jurong West</option>
-                  <option value="Tampines">Tampines</option>
-                  <option value="Toa Payoh">Toa Payoh</option>
+                  {townOptions.map((t) => (
+                    <option key={t.town_id} value={t.town_name}>
+                      {t.town_name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -434,13 +538,16 @@ export default function AdminDataManagement() {
                   className="flex-1 ml-4 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">type</option>
-                  <option value="2-Room">2-Room</option>
-                  <option value="3-Room">3-Room</option>
-                  <option value="4-Room">4-Room</option>
-                  <option value="5-Room">5-Room</option>
-                  <option value="Executive">Executive</option>
+
+                  {/* value = EXACT DB string, label = pretty text */}
+                  <option value="2 ROOM">2-Room</option>
+                  <option value="3 ROOM">3-Room</option>
+                  <option value="4 ROOM">4-Room</option>
+                  <option value="5 ROOM">5-Room</option>
+                  <option value="EXECUTIVE">Executive</option>
                 </select>
               </div>
+
 
               {/* Lease Left */}
               <div className="flex items-center justify-between">
